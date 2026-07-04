@@ -23,6 +23,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import httpx
 import websockets
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,9 +33,31 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("screencast")
 
 CDP_HOST = "http://localhost:9222"
+BACKEND_HTTP = "http://127.0.0.1:8790"
 BACKEND_WS = "ws://127.0.0.1:8790/ingest/screencast"
 
 RETRY_DELAY = 2
+HIGHLIGHT_POLL_SECONDS = 0.15   # imperceptible vs the 2-5fps hybrid feed
+HIGHLIGHT_HOLD_SECONDS = 0.5    # how long an injected highlight stays up
+
+# Injected into the page to draw the highlight box + a click ripple, both
+# self-removing after `hold` ms so a marker can never get stuck even if this
+# forwarder dies mid-highlight. All units are CSS pixels (position:fixed), which
+# match the driver's click coordinates directly.
+_HIGHLIGHT_JS = """(function(){
+  var root=document.documentElement;
+  var box=document.createElement('div');
+  box.style.cssText='position:fixed;left:%(left)dpx;top:%(top)dpx;width:%(w)dpx;'+
+    'height:%(h)dpx;border:2px solid rgb(245,158,11);background:rgba(245,158,11,.30);'+
+    'border-radius:4px;z-index:2147483647;pointer-events:none;box-sizing:border-box;';
+  var dot=document.createElement('div');
+  dot.style.cssText='position:fixed;left:%(cx)dpx;top:%(cy)dpx;width:14px;height:14px;'+
+    'margin:-7px 0 0 -7px;border:2px solid rgb(245,158,11);border-radius:50%%;'+
+    'z-index:2147483647;pointer-events:none;box-sizing:border-box;';
+  root.appendChild(box); root.appendChild(dot);
+  setTimeout(function(){box.remove();dot.remove();}, %(hold)d);
+  return 'ok';
+})()"""
 
 # Low-res motion feed.
 SCREENCAST_PARAMS = {
@@ -94,10 +117,14 @@ async def stream_screencast(client: ReconnectingWSClient):
             except Exception:
                 log.exception("getLayoutMetrics failed")
 
-        async def capture_hq():
+        async def capture_hq(force=False):
             nonlocal capturing
-            if capturing:
+            if capturing and not force:
                 return
+            # Wait out an in-flight capture rather than dropping a forced one
+            # (used by highlights, which must not be skipped).
+            while capturing:
+                await asyncio.sleep(0.02)
             capturing = True
             try:
                 res = await send("Page.captureScreenshot", {"format": "jpeg", "quality": HQ_QUALITY})
@@ -117,6 +144,60 @@ async def stream_screencast(client: ReconnectingWSClient):
             except asyncio.CancelledError:
                 return
             await capture_hq()
+
+        async def show_highlight(h):
+            # In-page highlight baked into real pixels by injecting a DOM node
+            # via Runtime.evaluate.
+            #
+            # We deliberately do NOT use CDP's Overlay.highlightRect: verified on
+            # this machine that its highlight renders on a separate compositor
+            # layer that headless captureScreenshot / screencast never include
+            # (the frame comes back pure white). Injecting a position:fixed
+            # element instead puts the marker in the page's own content, so it
+            # shows up in the very next captured frame — the effect the native
+            # Overlay was supposed to give. Bonus: fixed-position CSS pixels map
+            # 1:1 to the driver's click coords, so there's no visualViewport /
+            # DPR scaling bug to correct (the concern that applied to the
+            # device-pixel Overlay API simply doesn't arise here).
+            cx = int(h["x"])
+            cy = int(h["y"])
+            w = int(h.get("w") or 36)
+            ht = int(h.get("h") or 36)
+            js = _HIGHLIGHT_JS % {
+                "left": cx - w // 2, "top": cy - ht // 2, "w": w, "h": ht,
+                "cx": cx, "cy": cy, "hold": int(HIGHLIGHT_HOLD_SECONDS * 1000),
+            }
+            try:
+                await send("Runtime.evaluate", {"expression": js})
+                # Proactively grab a frame *now* so the highlight is guaranteed
+                # to reach the dashboard even on a static page that emits no
+                # screencast frames of its own.
+                await capture_hq(force=True)
+                await asyncio.sleep(HIGHLIGHT_HOLD_SECONDS)
+                await capture_hq(force=True)   # clean resting frame afterwards
+            except Exception:
+                log.exception("highlight failed")
+
+        async def poll_highlights(http):
+            while True:
+                try:
+                    r = await http.get(f"{BACKEND_HTTP}/pending-highlights")
+                    for h in r.json().get("highlights", []):
+                        await show_highlight(h)
+                except Exception:
+                    log.debug("highlight poll failed", exc_info=True)
+                await asyncio.sleep(HIGHLIGHT_POLL_SECONDS)
+
+        async def post_navigate(http, url):
+            # Passive fallback: even with no cooperating driver, a plain page
+            # navigation still lands a marker on the timeline.
+            try:
+                await http.post(f"{BACKEND_HTTP}/action",
+                                json={"type": "navigate", "target": url})
+            except Exception:
+                log.debug("post_navigate failed", exc_info=True)
+
+        http = httpx.AsyncClient(timeout=2.0)
 
         async def recv_loop():
             nonlocal quiet_task
@@ -147,20 +228,29 @@ async def stream_screencast(client: ReconnectingWSClient):
                     if quiet_task:
                         quiet_task.cancel()
                     quiet_task = asyncio.create_task(fire_after_quiet())
-                elif method in ("Page.frameResized",):
+                elif method == "Page.frameNavigated":
+                    frame = msg["params"].get("frame", {})
+                    if not frame.get("parentId"):   # main frame only
+                        await refresh_layout()
+                        await post_navigate(http, frame.get("url"))
+                elif method == "Page.frameResized":
                     await refresh_layout()
 
         recv_task = asyncio.create_task(recv_loop())
+        poll_task = asyncio.create_task(poll_highlights(http))
         try:
             await send("Page.enable")
+            await send("Runtime.enable")
             await refresh_layout()
             await send("Page.startScreencast", SCREENCAST_PARAMS)
             await capture_hq()   # crisp first paint immediately
             await recv_task
         finally:
             recv_task.cancel()
+            poll_task.cancel()
             if quiet_task:
                 quiet_task.cancel()
+            await http.aclose()
     return True
 
 

@@ -176,5 +176,49 @@ async def narrate(body: NarrateBody):
     return {"ok": True}
 
 
+class Coords(BaseModel):
+    x: int
+    y: int
+
+
+class ActionBody(BaseModel):
+    type: str            # click | type | scroll | navigate | key
+    target: str | None = None
+    coords: Coords | None = None
+    # Optional highlight box size (page px) around coords; defaults to a small
+    # marker. Only used for pointer-ish actions.
+    w: int = 36
+    h: int = 36
+
+
+@app.post("/action")
+async def action(body: ActionBody):
+    event = {
+        "type": "action",
+        "ts": int(time.time() * 1000),
+        "action": body.type,
+        "target": body.target,
+        "coords": body.coords.model_dump() if body.coords else None,
+    }
+    actions.append(event)
+    await _broadcast(event)
+    # Queue a native in-page highlight for pointer actions with a location.
+    # The screencast forwarder polls /pending-highlights and draws it with the
+    # browser's own Overlay domain, so it's baked into the next frame.
+    if body.coords and body.type in ("click", "type", "scroll"):
+        pending_highlights.append({
+            "x": body.coords.x, "y": body.coords.y, "w": body.w, "h": body.h,
+        })
+    return {"ok": True}
+
+
+@app.get("/pending-highlights")
+async def get_pending_highlights():
+    # Drain-on-read: the forwarder pulls whatever accumulated since last poll.
+    items = list(pending_highlights)
+    pending_highlights.clear()
+    return {"highlights": items}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8790)

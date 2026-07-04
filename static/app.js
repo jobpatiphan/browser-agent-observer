@@ -2,8 +2,18 @@
   const statusEl = document.getElementById("conn-status");
   const flowCountEl = document.getElementById("flow-count");
   const frameEl = document.getElementById("browser-frame");
+  const frameBadge = document.getElementById("frame-badge");
+  const cursorOverlay = document.getElementById("cursor-overlay");
+  const filmstrip = document.getElementById("filmstrip");
   const trafficBody = document.getElementById("traffic-body");
   const narrationBody = document.getElementById("narration-body");
+
+  // Latest frame's page dimensions (px), so we can map action coords onto the
+  // scaled <img>. Client-side cursor is approximate; the authoritative
+  // highlight is the one baked into the frame by the forwarder.
+  let frameW = null, frameH = null;
+  let liveFollow = true;   // false while the user is scrubbing the filmstrip
+  let cursorTimer = null;
 
   const overlay = document.getElementById("detail-overlay");
   const detailTitle = document.getElementById("detail-title");
@@ -126,23 +136,126 @@
     overlay.classList.remove("hidden");
   }
 
-  function addNarration(event) {
+  // ---- activity log (narration + actions + commands) --------------------
+  let logFilter = "all";
+
+  function addActivity(kind, ts, label, cls) {
     const line = document.createElement("div");
-    line.className = "narr-line narr-" + (event.level || "info");
-    line.innerHTML = `<span class="narr-ts">${fmtTime(event.ts)}</span>${escapeHtml(event.text)}`;
+    line.className = "log-line log-" + kind + (cls ? " " + cls : "");
+    line.dataset.kind = kind;
+    line.innerHTML =
+      `<span class="log-ts">${fmtTime(ts)}</span>` +
+      `<span class="log-tag">${kind}</span>` +
+      `<span class="log-text">${label}</span>`;
+    line.hidden = !(logFilter === "all" || logFilter === kind);
     narrationBody.appendChild(line);
     narrationBody.scrollTop = narrationBody.scrollHeight;
+  }
+
+  function addNarration(event) {
+    addActivity("narration", event.ts,
+      escapeHtml(event.text), "level-" + (event.level || "info"));
+  }
+
+  function addAction(event) {
+    const c = event.coords ? ` <span class="log-coords">(${event.coords.x},${event.coords.y})</span>` : "";
+    const tgt = event.target ? " " + escapeHtml(event.target) : "";
+    addActivity("action", event.ts,
+      `<b>${escapeHtml(event.action)}</b>${tgt}${c}`);
+    if (event.coords) showCursor(event.coords);
+    markFilmstrip(event);
+  }
+
+  document.querySelectorAll(".log-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".log-tab").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      logFilter = btn.dataset.filter;
+      narrationBody.querySelectorAll(".log-line").forEach((l) => {
+        l.hidden = !(logFilter === "all" || logFilter === l.dataset.kind);
+      });
+    });
+  });
+
+  // ---- browser frame + client cursor overlay ----------------------------
+  function setFrame(event) {
+    frameEl.src = "data:image/jpeg;base64," + event.data;
+    if (event.width) frameW = event.width;
+    if (event.height) frameH = event.height;
+    frameBadge.textContent = event.hq ? "HQ" : "live";
+    frameBadge.className = "frame-badge " + (event.hq ? "badge-hq" : "badge-live");
+  }
+
+  // Map page coords -> position within the rendered (object-fit:contain) image.
+  function pageToDisplay(x, y) {
+    const wrap = document.getElementById("frame-wrap").getBoundingClientRect();
+    const img = frameEl.getBoundingClientRect();
+    if (!frameW || !frameH || !img.width) return null;
+    const scale = Math.min(img.width / frameW, img.height / frameH);
+    const offX = img.left - wrap.left + (img.width - frameW * scale) / 2;
+    const offY = img.top - wrap.top + (img.height - frameH * scale) / 2;
+    return { x: offX + x * scale, y: offY + y * scale };
+  }
+
+  function showCursor(coords) {
+    const p = pageToDisplay(coords.x, coords.y);
+    if (!p) return;
+    cursorOverlay.style.left = p.x + "px";
+    cursorOverlay.style.top = p.y + "px";
+    cursorOverlay.classList.remove("hidden");
+    // restart the ripple animation
+    cursorOverlay.classList.remove("ripple");
+    void cursorOverlay.offsetWidth;
+    cursorOverlay.classList.add("ripple");
+    if (cursorTimer) clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(() => cursorOverlay.classList.add("hidden"), 1200);
+  }
+
+  // ---- filmstrip --------------------------------------------------------
+  const MAX_THUMBS = 60;
+
+  function addThumb(event) {
+    const thumb = document.createElement("div");
+    thumb.className = "thumb" + (event.hq ? " thumb-hq" : "");
+    thumb.dataset.ts = event.ts;
+    thumb.style.backgroundImage = `url("data:image/jpeg;base64,${event.data}")`;
+    thumb.title = new Date(event.ts).toLocaleTimeString([], { hour12: false });
+    thumb.addEventListener("click", () => {
+      liveFollow = false;
+      frameEl.src = `data:image/jpeg;base64,${event.data}`;
+      frameBadge.textContent = "paused";
+      frameBadge.className = "frame-badge badge-paused";
+      filmstrip.querySelectorAll(".thumb").forEach((t) => t.classList.remove("sel"));
+      thumb.classList.add("sel");
+    });
+    filmstrip.appendChild(thumb);
+    while (filmstrip.children.length > MAX_THUMBS) filmstrip.removeChild(filmstrip.firstChild);
+  }
+
+  // Put an action marker on the most recent thumb (closest in time).
+  function markFilmstrip(event) {
+    const last = filmstrip.lastElementChild;
+    if (last) last.classList.add("has-action");
   }
 
   function handleMessage(event) {
     if (event.type === "flow") {
       upsertFlow(event);
     } else if (event.type === "frame") {
-      frameEl.src = "data:image/jpeg;base64," + event.data;
+      if (liveFollow) setFrame(event);
+      addThumb(event);
     } else if (event.type === "narration") {
       addNarration(event);
+    } else if (event.type === "action") {
+      addAction(event);
     }
   }
+
+  // Double-click the frame to resume the live feed after scrubbing.
+  frameEl.addEventListener("dblclick", () => {
+    liveFollow = true;
+    filmstrip.querySelectorAll(".thumb").forEach((t) => t.classList.remove("sel"));
+  });
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";

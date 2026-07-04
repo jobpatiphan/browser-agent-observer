@@ -14,10 +14,14 @@
 
   <main id="layout">
     <section id="browser-pane">
-      <h2>Browser</h2>
+      <h2>Browser <span id="frame-badge" class="frame-badge"></span></h2>
       <div class="pane-body" id="browser-body">
-        <img id="browser-frame" alt="waiting for browser feed…">
+        <div id="frame-wrap">
+          <img id="browser-frame" alt="waiting for browser feed…">
+          <div id="cursor-overlay" class="hidden"></div>
+        </div>
       </div>
+      <div id="filmstrip" title="click a frame to inspect it; click ‘live’ to resume"></div>
     </section>
 
     <section id="traffic-pane">
@@ -33,7 +37,13 @@
     </section>
 
     <section id="narration-pane">
-      <h2>Agent narration</h2>
+      <div class="log-tabs">
+        <button class="log-tab active" data-filter="all">Activity</button>
+        <button class="log-tab" data-filter="narration">Narration</button>
+        <button class="log-tab" data-filter="action">Actions</button>
+        <button class="log-tab" data-filter="command">Commands</button>
+        <button id="export-btn" title="Download this session for replay">⤓ Export</button>
+      </div>
       <div class="pane-body" id="narration-body"></div>
     </section>
   </main>

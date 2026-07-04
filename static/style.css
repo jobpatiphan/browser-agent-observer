@@ -89,12 +89,101 @@ section h2 {
   justify-content: center;
   background: #000;
 }
+#frame-wrap {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
 #browser-frame {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
 #browser-frame:not([src]) { display: none; }
+
+/* Client-side cursor + ripple. Approximate; the real marker is baked into
+   the frame by the forwarder's DOM injection. */
+#cursor-overlay {
+  position: absolute;
+  width: 0; height: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+#cursor-overlay.hidden { display: none; }
+#cursor-overlay::before {
+  content: "";
+  position: absolute;
+  left: -6px; top: -6px; width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+#cursor-overlay.ripple::after {
+  content: "";
+  position: absolute;
+  left: -6px; top: -6px; width: 12px; height: 12px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  animation: ripple 0.9s ease-out;
+}
+@keyframes ripple {
+  from { transform: scale(1); opacity: .9; }
+  to   { transform: scale(5); opacity: 0; }
+}
+
+.frame-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.badge-live { background: #0d1f0d; color: var(--green); }
+.badge-hq { background: #1a2436; color: var(--blue); }
+.badge-paused { background: #2a230d; color: var(--orange); }
+
+/* Filmstrip */
+#filmstrip {
+  display: flex;
+  gap: 3px;
+  height: 56px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-alt);
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 44px;
+  background-size: cover;
+  background-position: top center;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: transform .08s;
+}
+.thumb-hq { border-color: #24507a; }
+.thumb.sel { outline: 2px solid var(--accent); }
+.thumb.has-action::after {
+  content: "";
+  position: absolute;
+  left: 3px; bottom: 3px; width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px var(--accent);
+}
+/* Hover preview — enlarge the thumb (Playwright-trace-viewer style). */
+.thumb:hover {
+  transform: scale(3.4);
+  transform-origin: bottom left;
+  z-index: 10;
+  border-color: var(--accent);
+}
 
 table { width: 100%; border-collapse: collapse; }
 thead th {
@@ -126,17 +215,51 @@ tbody tr.failed td { color: var(--red); opacity: .8; }
 .status-4xx { color: var(--orange); }
 .status-5xx { color: var(--red); }
 
+.log-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+}
+.log-tab, #export-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.log-tab.active { color: var(--accent); border-color: var(--border); background: var(--bg); }
+.log-tab:hover, #export-btn:hover { color: var(--text); }
+#export-btn { margin-left: auto; border-color: var(--border); }
+
 #narration-body {
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
-.narr-line { line-height: 1.5; }
-.narr-ts { color: var(--muted); margin-right: 8px; font-size: 11px; }
-.narr-info { color: var(--text); }
-.narr-warn { color: var(--orange); }
-.narr-error { color: var(--red); }
+.log-line { line-height: 1.5; display: flex; gap: 8px; align-items: baseline; }
+.log-line[hidden] { display: none; }
+.log-ts { color: var(--muted); font-size: 11px; flex: 0 0 auto; }
+.log-tag {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); border: 1px solid var(--border); border-radius: 3px;
+  padding: 0 4px; flex: 0 0 auto; align-self: center;
+}
+.log-text { flex: 1; min-width: 0; word-break: break-word; }
+.log-coords { color: var(--muted); }
+.log-narration.level-info .log-text { color: var(--text); }
+.log-narration.level-warn .log-text { color: var(--orange); }
+.log-narration.level-error .log-text { color: var(--red); }
+.log-action .log-tag { color: var(--accent); border-color: var(--accent); }
+.log-action .log-text { color: #ffd9a0; }
+.log-command .log-tag { color: var(--blue); border-color: #24507a; }
+.log-command .log-text { font-family: inherit; color: var(--blue); white-space: pre-wrap; }
 
 #detail-overlay {
   position: fixed;
