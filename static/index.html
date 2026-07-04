@@ -26,10 +26,28 @@
 
     <section id="traffic-pane">
       <h2>Traffic</h2>
+      <div id="traffic-filters">
+        <select id="filter-method">
+          <option value="">method ▾</option>
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>DELETE</option><option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+        </select>
+        <select id="filter-status">
+          <option value="">status ▾</option>
+          <option value="2">2xx</option><option value="3">3xx</option>
+          <option value="4">4xx</option><option value="5">5xx</option>
+        </select>
+        <input id="filter-search" type="search" placeholder="🔍 search url / path">
+      </div>
       <div class="pane-body">
         <table id="traffic-table">
           <thead>
-            <tr><th>Method</th><th>Path</th><th>Status</th><th>Size</th><th>Time</th></tr>
+            <tr>
+              <th data-sort="method">Method</th><th>Path</th>
+              <th>Status</th><th data-sort="size">Size</th>
+              <th data-sort="duration_ms">Time</th>
+              <th title="Security headers present / 4">Sec</th>
+            </tr>
           </thead>
           <tbody id="traffic-body"></tbody>
         </table>
@@ -54,15 +72,17 @@
         <span id="detail-title"></span>
         <button id="detail-close">✕</button>
       </div>
-      <div id="detail-columns">
-        <div class="detail-col">
-          <h3>Request</h3>
-          <pre id="detail-request"></pre>
-        </div>
-        <div class="detail-col">
-          <h3>Response</h3>
-          <pre id="detail-response"></pre>
-        </div>
+      <div id="detail-tabs">
+        <button class="detail-tab active" data-tab="request">Request</button>
+        <button class="detail-tab" data-tab="response">Response</button>
+        <button class="detail-tab" data-tab="cookies">Cookies</button>
+        <button class="detail-tab" data-tab="timing">Timing</button>
+      </div>
+      <div id="detail-body">
+        <pre class="detail-view" id="tab-request"></pre>
+        <pre class="detail-view hidden" id="tab-response"></pre>
+        <div class="detail-view hidden" id="tab-cookies"></div>
+        <div class="detail-view hidden" id="tab-timing"></div>
       </div>
     </div>
   </div>

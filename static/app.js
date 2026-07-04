@@ -17,14 +17,71 @@
 
   const overlay = document.getElementById("detail-overlay");
   const detailTitle = document.getElementById("detail-title");
-  const detailRequest = document.getElementById("detail-request");
-  const detailResponse = document.getElementById("detail-response");
+  const tabRequest = document.getElementById("tab-request");
+  const tabResponse = document.getElementById("tab-response");
+  const tabCookies = document.getElementById("tab-cookies");
+  const tabTiming = document.getElementById("tab-timing");
   document.getElementById("detail-close").addEventListener("click", () => {
     overlay.classList.add("hidden");
   });
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
   });
+  document.querySelectorAll(".detail-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".detail-tab").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      document.querySelectorAll(".detail-view").forEach((v) => v.classList.add("hidden"));
+      document.getElementById("tab-" + btn.dataset.tab).classList.remove("hidden");
+    });
+  });
+
+  // ---- traffic filtering + security headers -----------------------------
+  const filterMethod = document.getElementById("filter-method");
+  const filterStatus = document.getElementById("filter-status");
+  const filterSearch = document.getElementById("filter-search");
+  [filterMethod, filterStatus].forEach((el) => el.addEventListener("change", applyFilters));
+  filterSearch.addEventListener("input", applyFilters);
+
+  function rowMatches(ev) {
+    if (!ev) return true;
+    if (filterMethod.value && ev.method !== filterMethod.value) return false;
+    if (filterStatus.value) {
+      if (ev.status == null) return false;
+      if (String(ev.status)[0] !== filterStatus.value) return false;
+    }
+    const q = filterSearch.value.trim().toLowerCase();
+    if (q && !((ev.url || "") + " " + (ev.path || "")).toLowerCase().includes(q)) return false;
+    return true;
+  }
+
+  function applyFilters() {
+    for (const [id, row] of rowsById) {
+      row.hidden = !rowMatches(flowDataById.get(id));
+    }
+  }
+
+  // The 4 headers that matter most for a quick pentest read.
+  const SEC_HEADERS = [
+    { key: "content-security-policy", label: "Content-Security-Policy" },
+    { key: "strict-transport-security", label: "Strict-Transport-Security" },
+    { key: "x-frame-options", label: "X-Frame-Options / frame-ancestors" },
+    { key: "x-content-type-options", label: "X-Content-Type-Options" },
+  ];
+
+  function securityReport(ev) {
+    const pairs = headerPairs(ev && ev.response && ev.response.headers);
+    const names = new Set(pairs.map(([k]) => String(k).toLowerCase()));
+    const cspVal = (pairs.find(([k]) => k.toLowerCase() === "content-security-policy") || [])[1] || "";
+    const present = [], missing = [];
+    for (const h of SEC_HEADERS) {
+      let ok = names.has(h.key);
+      // X-Frame-Options is also satisfied by CSP frame-ancestors.
+      if (h.key === "x-frame-options" && /frame-ancestors/i.test(cspVal)) ok = true;
+      (ok ? present : missing).push(h.label);
+    }
+    return { present, missing, score: present.length, total: SEC_HEADERS.length };
+  }
 
   const rowsById = new Map();
   const flowDataById = new Map();
@@ -75,20 +132,35 @@
     if (event.phase === "request") {
       row.className = "pending";
       row.innerHTML =
-        `<td>${escapeHtml(event.method)}</td>` +
-        `<td>${escapeHtml(event.path || event.url)}</td>` +
-        `<td>…</td><td>-</td><td>${fmtTime(event.ts)}</td>`;
+        `<td class="${methodClass(event.method)}">${escapeHtml(event.method)}</td>` +
+        `<td title="${escapeHtml(event.url || "")}">${escapeHtml(event.path || event.url)}</td>` +
+        `<td>…</td><td>-</td><td>-</td><td>-</td>`;
     } else {
       row.className = "";
+      const sec = securityReport(event);
+      row.dataset.ts = event.ts;
       row.innerHTML =
-        `<td>${escapeHtml(event.method)}</td>` +
-        `<td>${escapeHtml(event.path || event.url)}</td>` +
+        `<td class="${methodClass(event.method)}">${escapeHtml(event.method)}</td>` +
+        `<td title="${escapeHtml(event.url || "")}">${escapeHtml(event.path || event.url)}</td>` +
         `<td class="${statusClass(event.status)}">${event.status ?? "-"}</td>` +
-        `<td>${fmtSize(event.size)}</td><td>${fmtTime(event.ts)}</td>`;
+        `<td>${fmtSize(event.size)}</td>` +
+        `<td title="${new Date(event.ts).toLocaleTimeString([], { hour12: false })}">${event.duration_ms != null ? event.duration_ms + "ms" : "-"}</td>` +
+        `<td>${secBadge(sec)}</td>`;
       flowDataById.set(event.id, event);
+      row.hidden = !rowMatches(event);
     }
 
-    trafficBody.scrollTop = trafficBody.scrollHeight;
+    if (liveFollow) trafficBody.scrollTop = trafficBody.scrollHeight;
+  }
+
+  function methodClass(m) {
+    return "m-" + String(m || "").toLowerCase();
+  }
+
+  function secBadge(sec) {
+    const cls = sec.score === sec.total ? "sec-good" : sec.score === 0 ? "sec-bad" : "sec-warn";
+    const tip = (sec.missing.length ? "Missing: " + sec.missing.join(", ") : "All present");
+    return `<span class="sec-badge ${cls}" title="${escapeHtml(tip)}">${sec.score}/${sec.total}</span>`;
   }
 
   function escapeHtml(s) {
@@ -131,9 +203,68 @@
     const event = flowDataById.get(id);
     if (!event) return;
     detailTitle.textContent = `${event.method} ${event.url} — ${event.status ?? "-"}`;
-    detailRequest.textContent = renderSide(event.request);
-    detailResponse.textContent = renderSide(event.response);
+    tabRequest.textContent = renderSide(event.request);
+    tabResponse.textContent = renderSide(event.response);
+    renderCookies(event);
+    renderTiming(event);
+    // reset to the Request tab
+    document.querySelectorAll(".detail-tab").forEach((b, i) => b.classList.toggle("active", i === 0));
+    document.querySelectorAll(".detail-view").forEach((v) => v.classList.add("hidden"));
+    tabRequest.classList.remove("hidden");
     overlay.classList.remove("hidden");
+  }
+
+  function renderCookies(event) {
+    const out = [];
+    const reqCookie = headerPairs(event.request && event.request.headers)
+      .filter(([k]) => k.toLowerCase() === "cookie");
+    const setCookies = headerPairs(event.response && event.response.headers)
+      .filter(([k]) => k.toLowerCase() === "set-cookie");
+
+    out.push(`<h4>Set-Cookie (${setCookies.length})</h4>`);
+    if (setCookies.length) {
+      setCookies.forEach(([, v], i) => {
+        const flags = [];
+        if (/;\s*httponly/i.test(v)) flags.push("HttpOnly");
+        if (/;\s*secure/i.test(v)) flags.push("Secure");
+        const sm = v.match(/;\s*samesite=([^;]+)/i);
+        flags.push("SameSite=" + (sm ? sm[1].trim() : "—"));
+        out.push(`<div class="cookie">${i + 1}/${setCookies.length} <code>${escapeHtml(v)}</code>` +
+          `<div class="cookie-flags">${flags.map((f) => `<span>${escapeHtml(f)}</span>`).join("")}</div></div>`);
+      });
+    } else {
+      out.push('<div class="muted-block">none</div>');
+    }
+
+    out.push(`<h4>Request Cookie</h4>`);
+    if (reqCookie.length) {
+      reqCookie.forEach(([, v]) => {
+        v.split(/;\s*/).forEach((c) => out.push(`<div class="cookie"><code>${escapeHtml(c)}</code></div>`));
+      });
+    } else {
+      out.push('<div class="muted-block">none</div>');
+    }
+    tabCookies.innerHTML = out.join("");
+  }
+
+  function renderTiming(event) {
+    const sec = securityReport(event);
+    const rows = [
+      ["Status", event.status ?? "-"],
+      ["Duration", event.duration_ms != null ? event.duration_ms + " ms" : "-"],
+      ["Response size", fmtSize(event.size)],
+      ["Started", new Date(event.ts).toLocaleTimeString([], { hour12: false })],
+    ];
+    let html = "<h4>Timing</h4><table class='kv'>" +
+      rows.map(([k, v]) => `<tr><td>${k}</td><td>${escapeHtml(String(v))}</td></tr>`).join("") +
+      "</table>";
+    html += `<h4>Security headers ${sec.score}/${sec.total}</h4><ul class="sec-list">`;
+    SEC_HEADERS.forEach((h) => {
+      const ok = sec.present.includes(h.label);
+      html += `<li class="${ok ? "sec-ok" : "sec-no"}">${ok ? "✓" : "✗"} ${escapeHtml(h.label)}</li>`;
+    });
+    html += "</ul>";
+    tabTiming.innerHTML = html;
   }
 
   // ---- activity log (narration + actions + commands) --------------------
@@ -150,6 +281,7 @@
     line.hidden = !(logFilter === "all" || logFilter === kind);
     narrationBody.appendChild(line);
     narrationBody.scrollTop = narrationBody.scrollHeight;
+    return line;
   }
 
   function addNarration(event) {
@@ -160,10 +292,29 @@
   function addAction(event) {
     const c = event.coords ? ` <span class="log-coords">(${event.coords.x},${event.coords.y})</span>` : "";
     const tgt = event.target ? " " + escapeHtml(event.target) : "";
-    addActivity("action", event.ts,
+    const line = addActivity("action", event.ts,
       `<b>${escapeHtml(event.action)}</b>${tgt}${c}`);
+    line.classList.add("clickable");
+    line.title = "jump to the closest traffic row";
+    line.addEventListener("click", () => syncToTraffic(event.ts));
     if (event.coords) showCursor(event.coords);
     markFilmstrip(event);
+  }
+
+  // Playwright-style: selecting an action jumps to the traffic captured nearest
+  // to it in time, flashing and scrolling the matching row into view.
+  function syncToTraffic(ts) {
+    let best = null, bestDelta = Infinity;
+    for (const row of rowsById.values()) {
+      if (row.hidden || !row.dataset.ts) continue;
+      const d = Math.abs(Number(row.dataset.ts) - ts);
+      if (d < bestDelta) { bestDelta = d; best = row; }
+    }
+    if (!best) return;
+    trafficBody.querySelectorAll("tr.flash").forEach((r) => r.classList.remove("flash"));
+    best.classList.add("flash");
+    best.scrollIntoView({ block: "center", behavior: "smooth" });
+    setTimeout(() => best.classList.remove("flash"), 1500);
   }
 
   document.querySelectorAll(".log-tab").forEach((btn) => {
