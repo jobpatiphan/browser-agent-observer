@@ -48,10 +48,14 @@ frames and navigations show up live. `./run.sh down` stops everything;
 
 ```bash
 docker compose up --build       # backend + proxy + forwarder in containers
+#   (on distros whose docker package lacks the compose plugin, use the
+#    standalone command instead:  docker-compose up --build)
 ```
 
 The browser stays on your host; the forwarder reaches its CDP via
-`host.docker.internal`. Dashboard at http://localhost:8790.
+`host.docker.internal`. Dashboard at http://localhost:8790. Verified end-to-end:
+image builds, all three services orchestrate, and a proxied request lands on the
+containerized backend.
 
 ## How it connects (the whole contract)
 

@@ -3,7 +3,8 @@ fastapi==0.118.0
 uvicorn==0.38.0
 pydantic==2.12.5
 websockets==15.0.1
-starlette==0.50.0
+# starlette is a transitive dependency of fastapi — let fastapi pin a
+# compatible version (pinning it here conflicts on a clean install).
 httpx==0.28.1
 # mitmproxy runs the addon (addon.py). Installed separately in its own env on
 # most setups, but pinned here for reference.

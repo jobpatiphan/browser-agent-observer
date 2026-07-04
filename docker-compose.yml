@@ -10,6 +10,8 @@
 # Trust the mitmproxy CA (written to ./certs/mitmproxy-ca-cert.pem) or keep
 # --ignore-certificate-errors on the browser for HTTPS interception.
 
+name: browser-agent-observer
+
 x-app: &app
   image: browser-agent-observer:latest
   build: .
