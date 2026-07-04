@@ -1,0 +1,10 @@
+# Pinned to the versions verified on the dev machine (Python 3.13.11).
+fastapi==0.118.0
+uvicorn==0.38.0
+pydantic==2.12.5
+websockets==15.0.1
+starlette==0.50.0
+httpx==0.28.1
+# mitmproxy runs the addon (addon.py). Installed separately in its own env on
+# most setups, but pinned here for reference.
+mitmproxy==12.2.1

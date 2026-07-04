@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Visual Pentest Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <span class="brand">Visual Pentest Dashboard</span>
+    <span id="conn-status" class="pill pill-down">connecting…</span>
+    <span id="flow-count" class="muted"></span>
+  </header>
+
+  <main id="layout">
+    <section id="browser-pane">
+      <h2>Browser</h2>
+      <div class="pane-body" id="browser-body">
+        <img id="browser-frame" alt="waiting for browser feed…">
+      </div>
+    </section>
+
+    <section id="traffic-pane">
+      <h2>Traffic</h2>
+      <div class="pane-body">
+        <table id="traffic-table">
+          <thead>
+            <tr><th>Method</th><th>Path</th><th>Status</th><th>Size</th><th>Time</th></tr>
+          </thead>
+          <tbody id="traffic-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="narration-pane">
+      <h2>Agent narration</h2>
+      <div class="pane-body" id="narration-body"></div>
+    </section>
+  </main>
+
+  <div id="detail-overlay" class="hidden">
+    <div id="detail-panel">
+      <div id="detail-header">
+        <span id="detail-title"></span>
+        <button id="detail-close">✕</button>
+      </div>
+      <div id="detail-columns">
+        <div class="detail-col">
+          <h3>Request</h3>
+          <pre id="detail-request"></pre>
+        </div>
+        <div class="detail-col">
+          <h3>Response</h3>
+          <pre id="detail-response"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

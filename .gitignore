@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+run/*.pid
+run/*.log
+run/*.sock
+*.session.json
