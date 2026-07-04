@@ -1,0 +1,14 @@
+{
+  "_comment": "Merge this into ~/.claude/settings.json (or a project .claude/settings.json). Replace the path with your checkout. Safe globally: the hook probes /healthz and no-ops when the dashboard isn't running.",
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python3 /home/kali/pentest-dashboard/hooks/claude_mirror.py" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Bash|Edit|Write|NotebookEdit", "hooks": [ { "type": "command", "command": "python3 /home/kali/pentest-dashboard/hooks/claude_mirror.py" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python3 /home/kali/pentest-dashboard/hooks/claude_mirror.py" } ] }
+    ]
+  }
+}

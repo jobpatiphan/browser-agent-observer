@@ -97,6 +97,20 @@ curl -sX POST localhost:8790/action -H 'content-type: application/json' \
 | `GET /metrics` | Prometheus-style gauges (flows, frames, clients, uptime) |
 | `GET /healthz` | liveness + counts |
 
+## Auto-coordinate with Claude Code / Codex
+
+You can make your agent light up the dashboard automatically — see
+`integrations/`:
+
+- **Claude Code** (`integrations/claude-code/`): a global hook
+  (`hooks/claude_mirror.py`) mirrors every Bash command, prompt and edit onto
+  the timeline — the harness runs it, so it happens every time without the model
+  remembering. It probes `/healthz` first and **no-ops in ~0.15s when the
+  dashboard is down**, so it's safe to install globally. Plus an `/observe`
+  skill that starts the dashboard and switches Claude into narrate mode.
+- **Codex** (`integrations/codex/`): `AGENTS.md` + an `obs-run` wrapper (Codex
+  has no hooks, so mirroring is opt-in via the wrapper).
+
 ## Configuration
 
 All via env (see `.env.example`) — every value has a loopback default:
