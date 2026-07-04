@@ -61,6 +61,13 @@ async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/history")
+async def history():
+    # Filmstrip lazily pulls recent frames here instead of us replaying the
+    # whole (multi-MB) ring buffer over the websocket on every reconnect.
+    return {"frames": list(frame_history)}
+
+
 @app.get("/healthz")
 async def healthz():
     return {
