@@ -9,6 +9,7 @@ so the proxy keeps working even if the dashboard backend is down/restarting.
 """
 import base64
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -18,7 +19,9 @@ from common_ws import ReconnectingWSClient  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-BACKEND_WS = "ws://127.0.0.1:8790/ingest/mitmproxy"
+# Where the dashboard backend lives (host:port). Overridable via env.
+_BACKEND = os.environ.get("DASH_BACKEND", "127.0.0.1:8790")
+BACKEND_WS = os.environ.get("DASH_INGEST_MITM_URL", f"ws://{_BACKEND}/ingest/mitmproxy")
 
 MAX_BODY_BYTES = 200_000
 PREVIEW_BYTES = 20_000

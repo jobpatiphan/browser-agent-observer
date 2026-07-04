@@ -10,6 +10,7 @@ single user watching a single live session.
 """
 import json
 import logging
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -26,12 +27,22 @@ log = logging.getLogger("dashboard")
 BASE_DIR = Path(__file__).parent
 STATIC_DIR = BASE_DIR / "static"
 
-# Localhost dev tool: only accept dashboard websocket upgrades whose Origin is
-# one of our own loopback pages. This blocks a random web page the user visits
-# from silently opening a socket to the dashboard (cross-site WS hijacking).
+# All tunables come from the environment (see .env.example) so nothing is
+# hardcoded to one machine.
+DASH_HOST = os.environ.get("DASH_HOST", "127.0.0.1")
+DASH_PORT = int(os.environ.get("DASH_PORT", "8790"))
+
+# Only accept dashboard websocket upgrades whose Origin is one of our own
+# pages. This blocks a random web page the user visits from silently opening a
+# socket to the dashboard (cross-site WS hijacking). Defaults cover loopback on
+# the configured port; add more via DASH_ALLOWED_ORIGINS (comma-separated).
 ALLOWED_WS_ORIGINS = {
-    "http://127.0.0.1:8790", "http://localhost:8790",
-    "https://127.0.0.1:8790", "https://localhost:8790",
+    f"{scheme}://{host}:{DASH_PORT}"
+    for scheme in ("http", "https")
+    for host in ("127.0.0.1", "localhost")
+}
+ALLOWED_WS_ORIGINS |= {
+    o.strip() for o in os.environ.get("DASH_ALLOWED_ORIGINS", "").split(",") if o.strip()
 }
 
 app = FastAPI()
@@ -270,4 +281,5 @@ async def metrics():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8790)
+    log.info("dashboard on http://%s:%d", DASH_HOST, DASH_PORT)
+    uvicorn.run(app, host=DASH_HOST, port=DASH_PORT)

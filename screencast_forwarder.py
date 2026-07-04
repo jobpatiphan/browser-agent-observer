@@ -18,6 +18,7 @@ order. A `capturing` flag prevents overlapping HQ captures.
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 import urllib.request
@@ -32,9 +33,11 @@ from common_ws import ReconnectingWSClient  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("screencast")
 
-CDP_HOST = "http://localhost:9222"
-BACKEND_HTTP = "http://127.0.0.1:8790"
-BACKEND_WS = "ws://127.0.0.1:8790/ingest/screencast"
+# CDP endpoint of the browser the agent drives, and where our backend lives.
+CDP_HOST = os.environ.get("CDP_URL", "http://localhost:9222").rstrip("/")
+_BACKEND = os.environ.get("DASH_BACKEND", "127.0.0.1:8790")
+BACKEND_HTTP = os.environ.get("DASH_BACKEND_HTTP", f"http://{_BACKEND}")
+BACKEND_WS = os.environ.get("DASH_INGEST_SCREENCAST_URL", f"ws://{_BACKEND}/ingest/screencast")
 
 RETRY_DELAY = 2
 HIGHLIGHT_POLL_SECONDS = 0.15   # imperceptible vs the 2-5fps hybrid feed
