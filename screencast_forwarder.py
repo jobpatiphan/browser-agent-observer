@@ -78,10 +78,15 @@ def _now_ms():
 
 def find_page_target():
     tabs = json.loads(urllib.request.urlopen(f"{CDP_HOST}/json", timeout=5).read())
-    for t in tabs:
-        if t.get("type") == "page":
+    pages = [t for t in tabs if t.get("type") == "page"]
+    if not pages:
+        return None
+    # Prefer a real navigated page over about:blank / devtools / new-tab, so we
+    # don't screencast a blank tab when the agent is driving another one.
+    for t in pages:
+        if (t.get("url") or "").startswith(("http://", "https://")):
             return t
-    return None
+    return pages[0]
 
 
 async def stream_screencast(client: ReconnectingWSClient):

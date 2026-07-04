@@ -36,10 +36,10 @@ export class Observer {
     return this._post("/narrate", { text, level });
   }
 
-  // type: click | type | scroll | navigate | key. x/y are page pixels.
-  action(type, target = null, x = null, y = null) {
+  // kind: click | type | scroll | navigate | key. x/y are page pixels.
+  action(kind, target = null, x = null, y = null) {
     const coords = x != null && y != null ? { x, y } : null;
-    return this._post("/action", { type, target, coords });
+    return this._post("/action", { type: kind, target, coords });
   }
 
   click(target = null, x = null, y = null) {

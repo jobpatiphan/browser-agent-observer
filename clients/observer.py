@@ -39,11 +39,11 @@ class Observer:
         """level: info | warn | error"""
         self._post("/narrate", {"text": text, "level": level})
 
-    def action(self, type: str, target: str | None = None,
+    def action(self, kind: str, target: str | None = None,
                x: int | None = None, y: int | None = None) -> None:
-        """type: click | type | scroll | navigate | key. x/y are page pixels."""
+        """kind: click | type | scroll | navigate | key. x/y are page pixels."""
         coords = {"x": x, "y": y} if x is not None and y is not None else None
-        self._post("/action", {"type": type, "target": target, "coords": coords})
+        self._post("/action", {"type": kind, "target": target, "coords": coords})
 
     def click(self, target: str | None = None, x: int | None = None, y: int | None = None) -> None:
         self.action("click", target, x, y)

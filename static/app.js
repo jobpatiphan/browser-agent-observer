@@ -383,10 +383,16 @@
     while (filmstrip.children.length > MAX_THUMBS) filmstrip.removeChild(filmstrip.firstChild);
   }
 
-  // Put an action marker on the most recent thumb (closest in time).
+  // Put an action marker on the thumb closest in time to the action.
   function markFilmstrip(event) {
-    const last = filmstrip.lastElementChild;
-    if (last) last.classList.add("has-action");
+    let best = null, bestDelta = Infinity;
+    for (const t of filmstrip.children) {
+      const ts = Number(t.dataset.ts);
+      if (!ts) continue;
+      const d = Math.abs(ts - event.ts);
+      if (d < bestDelta) { bestDelta = d; best = t; }
+    }
+    (best || filmstrip.lastElementChild)?.classList.add("has-action");
   }
 
   function addCommand(event) {
