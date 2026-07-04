@@ -389,6 +389,10 @@
     if (last) last.classList.add("has-action");
   }
 
+  function addCommand(event) {
+    addActivity("command", event.ts, "$ " + escapeHtml(event.cmd));
+  }
+
   function handleMessage(event) {
     if (event.type === "flow") {
       upsertFlow(event);
@@ -399,7 +403,80 @@
       addNarration(event);
     } else if (event.type === "action") {
       addAction(event);
+    } else if (event.type === "command") {
+      addCommand(event);
     }
+  }
+
+  // ---- session export (self-contained replay HTML) ----------------------
+  document.getElementById("export-btn").addEventListener("click", async () => {
+    try {
+      const data = await (await fetch("/export")).json();
+      const html = buildReplayHtml(data);
+      const blob = new Blob([html], { type: "text/html" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      a.download = `pentest-session-${stamp}.html`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) {
+      console.error("export failed", e);
+    }
+  });
+
+  function buildReplayHtml(data) {
+    // A single self-contained file: embedded frames + events + a tiny scrubber.
+    // No external requests, no video encoding — just the pieces we already have.
+    const json = JSON.stringify(data).replace(/</g, "\\u003c");
+    return `<!doctype html><html><head><meta charset="utf-8">
+<title>Pentest session replay</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#0d1117;color:#c9d1d9;font:13px/1.5 monospace}
+  header{padding:8px 16px;background:#161b22;border-bottom:2px solid #f59e0b;color:#f59e0b;font-weight:700}
+  #wrap{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#30363d;height:calc(100vh - 40px)}
+  section{background:#0d1117;overflow:auto;padding:10px}
+  img{max-width:100%;background:#000}
+  input[type=range]{width:100%}
+  table{width:100%;border-collapse:collapse}td{padding:3px 6px;border-bottom:1px solid #161b22;font-size:11.5px}
+  .tag{font-size:9px;text-transform:uppercase;color:#8b949e;border:1px solid #30363d;border-radius:3px;padding:0 4px;margin-right:6px}
+  .a{color:#ffd9a0}.c{color:#60a5fa}.n{color:#c9d1d9}
+  h3{color:#8b949e;font-size:11px;text-transform:uppercase}
+</style></head><body>
+<header>Pentest session replay — exported ${new Date(data.meta.exported_ts).toLocaleString()}</header>
+<div id="wrap">
+  <section>
+    <h3>Browser (<span id="pos">0</span>/${data.frames.length})</h3>
+    <img id="frame"><br>
+    <input id="scrub" type="range" min="0" max="${Math.max(0, data.frames.length - 1)}" value="0">
+    <div id="fts"></div>
+  </section>
+  <section>
+    <h3>Activity</h3><div id="log"></div>
+    <h3>Traffic (${data.flows.length})</h3><table id="traf"></table>
+  </section>
+</div>
+<script>
+const D=${json};
+const img=document.getElementById('frame'),scrub=document.getElementById('scrub'),
+      pos=document.getElementById('pos'),fts=document.getElementById('fts');
+function show(i){if(!D.frames.length)return;const f=D.frames[i];img.src='data:image/jpeg;base64,'+f.data;
+  pos.textContent=i+1;fts.textContent=new Date(f.ts).toLocaleTimeString();}
+scrub.oninput=e=>show(+e.target.value);show(0);
+const ev=[].concat(
+  D.narration.map(x=>({ts:x.ts,k:'n',t:x.text})),
+  D.actions.map(x=>({ts:x.ts,k:'a',t:x.action+' '+(x.target||'')+(x.coords?' ('+x.coords.x+','+x.coords.y+')':'')})),
+  D.commands.map(x=>({ts:x.ts,k:'c',t:'$ '+x.cmd}))
+).sort((a,b)=>a.ts-b.ts);
+document.getElementById('log').innerHTML=ev.map(e=>
+  '<div class="'+e.k+'"><span class="tag">'+({n:'narr',a:'action',c:'cmd'}[e.k])+'</span>'+
+  new Date(e.ts).toLocaleTimeString()+' '+esc(e.t)+'</div>').join('');
+document.getElementById('traf').innerHTML=D.flows.map(f=>
+  '<tr><td>'+esc(f.method)+'</td><td>'+esc(f.path||f.url||'')+'</td><td>'+(f.status||'-')+
+  '</td><td>'+(f.duration_ms!=null?f.duration_ms+'ms':'-')+'</td></tr>').join('');
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+</script></body></html>`;
   }
 
   // Double-click the frame to resume the live feed after scrubbing.

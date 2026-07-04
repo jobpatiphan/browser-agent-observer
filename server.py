@@ -44,6 +44,7 @@ frame_history: "deque[dict]" = deque(maxlen=60)
 latest_frame: dict | None = None
 narration: "deque[dict]" = deque(maxlen=200)
 actions: "deque[dict]" = deque(maxlen=200)
+commands: "deque[dict]" = deque(maxlen=200)
 pending_highlights: "deque[dict]" = deque(maxlen=50)
 dashboard_clients: set[WebSocket] = set()
 
@@ -106,6 +107,8 @@ async def ws_dashboard(ws: WebSocket):
         await ws.send_json(n)
     for a in actions:
         await ws.send_json(a)
+    for c in commands:
+        await ws.send_json(c)
 
     dashboard_clients.add(ws)
     try:
@@ -218,6 +221,52 @@ async def get_pending_highlights():
     items = list(pending_highlights)
     pending_highlights.clear()
     return {"highlights": items}
+
+
+class CommandBody(BaseModel):
+    cmd: str
+
+
+@app.post("/command")
+async def command(body: CommandBody):
+    event = {"type": "command", "ts": int(time.time() * 1000), "cmd": body.cmd}
+    commands.append(event)
+    await _broadcast(event)
+    return {"ok": True}
+
+
+@app.get("/export")
+async def export():
+    # Full snapshot the UI turns into a self-contained replay HTML file.
+    return {
+        "meta": {"exported_ts": int(time.time() * 1000),
+                 "uptime_s": round(time.time() - START_TIME, 1)},
+        "flows": list(flows),
+        "frames": list(frame_history),
+        "narration": list(narration),
+        "actions": list(actions),
+        "commands": list(commands),
+    }
+
+
+@app.get("/metrics")
+async def metrics():
+    # Minimal Prometheus-style text exposition for quick prod debugging.
+    lines = [
+        "# HELP dashboard_flows Captured HTTP flows in the ring buffer",
+        "# TYPE dashboard_flows gauge",
+        f"dashboard_flows {len(flows)}",
+        "# TYPE dashboard_frames gauge",
+        f"dashboard_frames {len(frame_history)}",
+        "# TYPE dashboard_clients gauge",
+        f"dashboard_clients {len(dashboard_clients)}",
+        "# TYPE dashboard_actions gauge",
+        f"dashboard_actions {len(actions)}",
+        "# TYPE dashboard_uptime_seconds counter",
+        f"dashboard_uptime_seconds {round(time.time() - START_TIME, 1)}",
+    ]
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":

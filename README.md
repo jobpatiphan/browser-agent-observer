@@ -92,6 +92,15 @@ curl -sX POST localhost:8790/command \
 `navigate` actions also appear automatically (no driver needed): the screencast
 forwarder watches CDP `Page.frameNavigated` and posts them for you.
 
+Other endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /history` | recent frames (filmstrip lazy-load) |
+| `GET /export` | full session snapshot; the UI's **⤓ Export** button turns it into a self-contained replay `.html` |
+| `GET /metrics` | Prometheus-style gauges (flows, frames, clients, uptime) |
+| `GET /healthz` | liveness + counts |
+
 ## Dashboard UI
 
 Open `http://127.0.0.1:8790/` in a browser.
