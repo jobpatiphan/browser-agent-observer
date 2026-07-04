@@ -1,0 +1,14 @@
+[Unit]
+Description=browser-agent-observer — CDP screencast forwarder
+PartOf=browser-agent-observer.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/browser-agent-observer
+EnvironmentFile=-%h/browser-agent-observer/.env
+ExecStart=/usr/bin/python3 %h/browser-agent-observer/screencast_forwarder.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=browser-agent-observer.target

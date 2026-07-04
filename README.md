@@ -140,9 +140,9 @@ or trust the CA at `~/.mitmproxy/mitmproxy-ca-cert.pem` (Docker writes it to
 
 ## Running as a persistent service (Linux)
 
-`systemd/` holds `--user` unit templates (edit the absolute paths for your
-checkout). `./run.sh` is the simpler always-works option; `launcher.sh` is a
-minimal start/stop fallback.
+`systemd/` holds `--user` unit templates (`browser-agent-observer.target` +
+three services) — see `systemd/README.md`. `./run.sh` is the simpler
+always-works option; `launcher.sh` is a minimal start/stop fallback.
 
 > Note: `systemd --user` services can be torn down at logout unless lingering is
 > enabled — `sudo loginctl enable-linger $USER` (one-time) if you want them to

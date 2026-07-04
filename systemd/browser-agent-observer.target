@@ -1,0 +1,5 @@
+[Unit]
+Description=browser-agent-observer (backend + proxy + screencast)
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=browser-agent-observer — mitmproxy traffic capture
+PartOf=browser-agent-observer.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/browser-agent-observer
+EnvironmentFile=-%h/browser-agent-observer/.env
+ExecStart=/usr/bin/mitmdump -s %h/browser-agent-observer/addon.py --listen-host 127.0.0.1 --listen-port 8083 -q
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=browser-agent-observer.target
