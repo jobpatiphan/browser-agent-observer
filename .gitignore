@@ -4,3 +4,5 @@ run/*.pid
 run/*.log
 run/*.sock
 *.session.json
+.env
+certs/

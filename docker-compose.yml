@@ -1,0 +1,49 @@
+# Runs the backend + traffic proxy + screencast forwarder in containers.
+# The BROWSER stays on your host (your agent drives it) — the forwarder reaches
+# its CDP endpoint via host.docker.internal.
+#
+#   cp .env.example .env      # optional
+#   docker compose up --build
+#   # dashboard: http://localhost:8790
+#   # launch your browser with --proxy-server=127.0.0.1:8083 --remote-debugging-port=9222
+#
+# Trust the mitmproxy CA (written to ./certs/mitmproxy-ca-cert.pem) or keep
+# --ignore-certificate-errors on the browser for HTTPS interception.
+
+x-app: &app
+  image: browser-agent-observer:latest
+  build: .
+  restart: unless-stopped
+
+services:
+  backend:
+    <<: *app
+    command: python server.py
+    environment:
+      DASH_HOST: 0.0.0.0        # bind all interfaces inside the container
+      DASH_PORT: "8790"
+    ports:
+      - "8790:8790"
+
+  proxy:
+    <<: *app
+    command: mitmdump -s addon.py --listen-host 0.0.0.0 --listen-port 8083 -q --set confdir=/certs
+    environment:
+      DASH_BACKEND: backend:8790
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./certs:/certs        # mitmproxy CA persists here for you to trust
+    depends_on:
+      - backend
+
+  forwarder:
+    <<: *app
+    command: python screencast_forwarder.py
+    environment:
+      DASH_BACKEND: backend:8790
+      CDP_URL: http://host.docker.internal:9222   # your browser on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"       # Linux: resolve the host
+    depends_on:
+      - backend
