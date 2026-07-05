@@ -6,6 +6,7 @@
 #   ./run.sh status     show what's running
 #   ./run.sh logs [name] tail a service log (backend|proxy|screencast)
 #   ./run.sh browser    launch a Chromium pointed at the proxy + CDP for you
+#   ./run.sh export [args]  save the current session to a replay .html
 #
 # Config comes from .env (copy .env.example). Every value has a default, so
 # `./run.sh up` works out of the box on a fresh clone.
@@ -97,6 +98,9 @@ case "${1:-help}" in
     echo "launching browser -> CDP :$CDP_PORT, proxy $PROXY_HOST:$PROXY_PORT"
     eval "$(browser_cmd)" &
     echo "  (pid $!) trust the mitmproxy CA or keep --ignore-certificate-errors for HTTPS"
+    ;;
+  export)
+    DASH_URL="http://$DASH_HOST:$DASH_PORT" "$PYTHON" "$DIR/tools/export_session.py" "${@:2}"
     ;;
   *)
     grep -E '^#( |$)' "$0" | sed -E 's/^# ?//' | head -12

@@ -27,5 +27,10 @@ When invoked:
    `obs.click('button#login', x=203, y=411)` (page pixels).
 6. Keep it concise and high-signal — skip trivial reads.
 
+**Record mode** — if the user says `/observe record` or asks to save the
+session, run `./run.sh export` before stopping. It writes a self-contained,
+redacted replay `.html` (credentials masked) that opens offline with a frame
+scrubber synced to traffic + activity. Tell them the filename.
+
 Stop watching with `./run.sh down`; the hooks auto-no-op once it's down, so
 nothing lingers.
