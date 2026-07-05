@@ -1,8 +1,14 @@
 # browser-agent-observer
 
+[![CI](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml/badge.svg)](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)
+
 A live, visual dashboard for watching **any** browser-driving agent — Claude
 computer-use, Codex, a Playwright/Puppeteer script, your own harness — do its
 thing. Three panes, computer-use style:
+
+![browser-agent-observer dashboard](docs/dashboard.png)
 
 - **Browser** — near-real-time screencast of the page (hybrid capture: a light
   motion feed while things move + a crisp high-quality frame once the screen
