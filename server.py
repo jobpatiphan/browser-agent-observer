@@ -251,14 +251,64 @@ async def command(body: CommandBody):
     return {"ok": True}
 
 
+SENSITIVE_HEADERS = {
+    "authorization", "proxy-authorization", "cookie", "set-cookie",
+    "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token",
+}
+SENSITIVE_QUERY = {
+    "token", "access_token", "refresh_token", "id_token", "api_key", "apikey",
+    "key", "sig", "signature", "password", "passwd", "pwd", "secret",
+    "session", "sessionid", "auth",
+}
+REDACTED = "‹redacted›"
+
+
+def _redact_url(url: str) -> str:
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    try:
+        p = urlsplit(url)
+        if not p.query:
+            return url
+        q = [(k, REDACTED if k.lower() in SENSITIVE_QUERY else v)
+             for k, v in parse_qsl(p.query, keep_blank_values=True)]
+        return urlunsplit(p._replace(query=urlencode(q)))
+    except Exception:
+        return url
+
+
+def _redact_headers(headers):
+    if not isinstance(headers, list):
+        return headers
+    return [[k, REDACTED if str(k).lower() in SENSITIVE_HEADERS else v] for k, v in headers]
+
+
+def _redact_flow(f: dict) -> dict:
+    f = json.loads(json.dumps(f))  # deep copy so the live buffer is untouched
+    if f.get("url"):
+        f["url"] = _redact_url(f["url"])
+    for side in ("request", "response"):
+        if isinstance(f.get(side), dict):
+            f[side]["headers"] = _redact_headers(f[side].get("headers"))
+    return f
+
+
 @app.get("/export")
-async def export():
+async def export(redact: bool = False):
     # Full snapshot the UI turns into a self-contained replay HTML file.
+    # redact=1 masks Authorization/Cookie/Set-Cookie headers and token-ish query
+    # params so a shared session doesn't leak credentials.
+    if redact:
+        flows_out = [_redact_flow(f) for f in flows]
+        ws_out = [{**m, "url": _redact_url(m.get("url", ""))} for m in ws_messages]
+    else:
+        flows_out = list(flows)
+        ws_out = list(ws_messages)
     return {
         "meta": {"exported_ts": int(time.time() * 1000),
-                 "uptime_s": round(time.time() - START_TIME, 1)},
-        "flows": list(flows),
-        "ws": list(ws_messages),
+                 "uptime_s": round(time.time() - START_TIME, 1),
+                 "redacted": bool(redact)},
+        "flows": flows_out,
+        "ws": ws_out,
         "frames": list(frame_history),
         "narration": list(narration),
         "actions": list(actions),

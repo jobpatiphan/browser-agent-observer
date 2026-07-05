@@ -276,7 +276,13 @@ tbody tr.flash { background: #3a3416 !important; transition: background .3s; }
 }
 .log-tab.active { color: var(--accent); border-color: var(--border); background: var(--bg); }
 .log-tab:hover, #export-btn:hover { color: var(--text); }
-#export-btn { margin-left: auto; border-color: var(--border); }
+#redact-toggle {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--muted); cursor: pointer;
+}
+#redact-toggle input { margin: 0; cursor: pointer; }
+#export-btn { margin-left: 6px; border-color: var(--border); }
 
 #narration-body {
   padding: 8px 12px;

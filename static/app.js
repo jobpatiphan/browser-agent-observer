@@ -466,7 +466,8 @@
   // ---- session export (self-contained replay HTML) ----------------------
   document.getElementById("export-btn").addEventListener("click", async () => {
     try {
-      const data = await (await fetch("/export")).json();
+      const redact = document.getElementById("redact-cb").checked ? "1" : "0";
+      const data = await (await fetch("/export?redact=" + redact)).json();
       const html = buildReplayHtml(data);
       const blob = new Blob([html], { type: "text/html" });
       const a = document.createElement("a");
