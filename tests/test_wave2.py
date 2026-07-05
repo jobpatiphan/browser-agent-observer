@@ -45,6 +45,23 @@ def test_sessions_empty_without_persistence():
     assert client.get("/sessions/whatever.jsonl").status_code == 404
 
 
+def test_graph_nodes_and_referer_edge():
+    with client.websocket_connect("/ingest/mitmproxy") as ws:
+        ws.send_json({"type": "flow", "phase": "response", "id": "g1", "ts": 1,
+                      "method": "GET", "url": "https://site-a.test/page", "path": "/page",
+                      "status": 200, "request": {"headers": []}, "response": {"headers": []}})
+        ws.send_json({"type": "flow", "phase": "response", "id": "g2", "ts": 2,
+                      "method": "GET", "url": "https://api.site-b.test/x", "path": "/x",
+                      "status": 200,
+                      "request": {"headers": [["Referer", "https://site-a.test/page"]]},
+                      "response": {"headers": []}})
+    g = client.get("/graph").json()
+    hosts = {n["id"] for n in g["nodes"]}
+    assert {"site-a.test", "api.site-b.test"} <= hosts
+    assert any(e["source"] == "site-a.test" and e["target"] == "api.site-b.test"
+               and e["kind"] == "link" for e in g["edges"])
+
+
 def test_har_export_shape():
     with client.websocket_connect("/ingest/mitmproxy") as ws:
         ws.send_json({

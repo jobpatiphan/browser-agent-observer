@@ -598,6 +598,71 @@ async def export_har(redact: bool = False):
     return JSONResponse(har, headers={"content-disposition": "attachment; filename=session.har"})
 
 
+def _host(u: str) -> str:
+    try:
+        return urlsplit(u or "").hostname or ""
+    except Exception:
+        return ""
+
+
+def _find_header(side: dict, name: str):
+    for k, v in ((side or {}).get("headers") or []):
+        if str(k).lower() == name:
+            return v
+    return None
+
+
+@app.get("/graph")
+async def graph():
+    # Attack-surface map: nodes are hosts the session touched, edges are the
+    # relationships between them (a Referer link, or a 3xx redirect). Each node
+    # carries its request count and worst finding severity, so the UI can colour
+    # a host red the moment something risky is seen on it.
+    nodes: dict[str, dict] = {}
+    edges: dict[tuple, int] = {}
+
+    def node(h: str):
+        if h:
+            nodes.setdefault(h, {"id": h, "requests": 0, "severity": None})
+
+    def worse(h: str, sev: str):
+        if not h or sev is None:
+            return
+        node(h)
+        cur = nodes[h]["severity"]
+        order = findings_engine.SEVERITY_ORDER
+        if cur is None or order.get(sev, 9) < order.get(cur, 9):
+            nodes[h]["severity"] = sev
+
+    for f in flows:
+        h = _host(f.get("url"))
+        node(h)
+        if h:
+            nodes[h]["requests"] += 1
+        ref = _find_header(f.get("request"), "referer")
+        if ref:
+            rh = _host(ref)
+            if rh and rh != h:
+                node(rh)
+                edges[(rh, h, "link")] = edges.get((rh, h, "link"), 0) + 1
+        status = f.get("status")
+        if isinstance(status, int) and 300 <= status < 400:
+            loc = _find_header(f.get("response"), "location")
+            lh = _host(loc) if loc else ""
+            if lh and lh != h:
+                node(lh)
+                edges[(h, lh, "redirect")] = edges.get((h, lh, "redirect"), 0) + 1
+
+    for fnd in findings:
+        worse(_host(fnd.get("url")), fnd.get("severity"))
+
+    return {
+        "nodes": list(nodes.values()),
+        "edges": [{"source": s, "target": t, "kind": k, "count": c}
+                  for (s, t, k), c in edges.items()],
+    }
+
+
 @app.get("/sessions")
 async def list_sessions():
     if not _session_file:
