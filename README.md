@@ -158,6 +158,10 @@ You can make your agent light up the dashboard automatically — see
   copy-paste launch flags in [`integrations/recipes.md`](integrations/recipes.md)
   (runnable Playwright example under `integrations/playwright/`).
 
+> **Solving a CTF with Claude Code?** There's a step-by-step workflow —
+> `./run.sh up` → `/observe-agent-browser` → watch traffic + findings live — in
+> [`docs/ctf-with-claude.md`](docs/ctf-with-claude.md).
+
 ## Configuration
 
 All via env (see `.env.example`) — every value has a loopback default:

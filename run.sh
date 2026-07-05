@@ -85,6 +85,23 @@ wait_for() {  # wait_for URL TRIES(0.5s each)
   return 1
 }
 
+port_open() {  # port_open HOST PORT  -> 0 if something is accepting there
+  "$PYTHON" - "$1" "$2" <<'PY' 2>/dev/null
+import socket, sys
+s = socket.socket(); s.settimeout(0.5)
+try:
+    s.connect((sys.argv[1], int(sys.argv[2]))); s.close()
+except Exception:
+    sys.exit(1)
+PY
+}
+
+wait_for_port() {  # wait_for_port HOST PORT TRIES(0.25s each)
+  local host="$1" port="$2" tries="${3:-40}" i
+  for ((i = 0; i < tries; i++)); do port_open "$host" "$port" && return 0; sleep 0.25; done
+  return 1
+}
+
 open_url() {
   local url="$1"
   # Graphical session only; headless boxes / CI stay silent.
@@ -165,8 +182,15 @@ case "${1:-help}" in
     if wait_for "$DASH_URL_FULL/healthz" 40; then
       start_one proxy mitmdump -s "$DIR/addon.py" --listen-host "$PROXY_HOST" --listen-port "$PROXY_PORT" -q
       start_one screencast "$PYTHON" "$DIR/screencast_forwarder.py"
-      echo
-      echo "  Dashboard: $DASH_URL_FULL"
+      # Don't report ready until the proxy is actually accepting connections —
+      # otherwise traffic fired right after `up` fails with a connection refused
+      # and the tool looks flaky.
+      if wait_for_port "$(browser_proxy_host)" "$PROXY_PORT" 40; then
+        echo
+        echo "  ✓ ready — dashboard: $DASH_URL_FULL   proxy: $(browser_proxy_host):$PROXY_PORT"
+      else
+        echo "  ⚠ proxy slow to bind on :$PROXY_PORT — check ./run.sh logs proxy" >&2
+      fi
       [[ "$OPEN_DASH" == "1" ]] && open_url "$DASH_URL_FULL"
       echo
       echo "  Now point your agent's browser at us — either:"
