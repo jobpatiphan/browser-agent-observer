@@ -45,6 +45,15 @@ def test_sessions_empty_without_persistence():
     assert client.get("/sessions/whatever.jsonl").status_code == 404
 
 
+def test_replay_headers_strips_hop_by_hop():
+    hdrs = server._replay_headers([
+        ["Host", "t"], ["Content-Length", "5"], ["Authorization", "Bearer x"],
+        ["Accept", "*/*"], "garbage",
+    ])
+    assert "Host" not in hdrs and "Content-Length" not in hdrs
+    assert hdrs["Authorization"] == "Bearer x" and hdrs["Accept"] == "*/*"
+
+
 def test_auth_gate(monkeypatch):
     monkeypatch.setattr(server, "DASH_TOKEN", "sekret")
     # UI shell + healthz stay open so the page can bootstrap

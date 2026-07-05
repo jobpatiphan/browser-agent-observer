@@ -58,6 +58,17 @@ DASH_TOKEN = os.environ.get("DASH_TOKEN", "")
 # (default) keeps everything in memory only.
 PERSIST_DIR = os.environ.get("PERSIST_DIR", "")
 
+# Where the traffic proxy listens, so replayed requests can be sent back through
+# it (and thus re-captured on the timeline, Burp-Repeater style).
+PROXY_HOST = os.environ.get("PROXY_HOST", "127.0.0.1")
+PROXY_PORT = int(os.environ.get("PROXY_PORT", "8083"))
+
+# Headers we must not copy verbatim when replaying — httpx recomputes them from
+# the actual URL/body, and forwarding stale values corrupts the request.
+_HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
+               "keep-alive", "proxy-authorization", "proxy-connection", "te",
+               "trailer", "upgrade"}
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -563,6 +574,56 @@ async def get_session(name: str):
             grouped[bucket[t]].append(e)
     grouped["meta"] = {"name": os.path.basename(name), "replayed": True}
     return grouped
+
+
+class ReplayBody(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: list | None = None          # [[name, value], ...]
+    body: str | None = None
+    through_proxy: bool = True            # re-capture on the timeline
+
+
+def _replay_headers(headers) -> dict:
+    out = {}
+    for pair in headers or []:
+        try:
+            k, v = pair
+        except (ValueError, TypeError):
+            continue
+        if str(k).lower() in _HOP_BY_HOP:
+            continue
+        out[str(k)] = v
+    return out
+
+
+@app.post("/replay")
+async def replay(body: ReplayBody):
+    # Burp-Repeater-lite: resend an (optionally edited) request. Routed back
+    # through the proxy by default, so it reappears as a fresh flow — and the
+    # findings engine re-scores it — automatically. This makes the tool *active*
+    # (it sends traffic), which is why it lives behind DASH_TOKEN when set.
+    import httpx
+    proxy = f"http://{PROXY_HOST}:{PROXY_PORT}" if body.through_proxy else None
+    hdrs = _replay_headers(body.headers)
+    content = body.body.encode() if isinstance(body.body, str) else None
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(proxy=proxy, verify=False, timeout=20,
+                                     follow_redirects=False) as c:
+            r = await c.request(body.method.upper(), body.url, headers=hdrs, content=content)
+    except Exception as e:
+        raise HTTPException(502, f"replay failed: {e}")
+    text = r.text
+    return {
+        "ok": True,
+        "status": r.status_code,
+        "duration_ms": int((time.time() - t0) * 1000),
+        "headers": [[k, v] for k, v in r.headers.items()],
+        "body": text[:200_000],
+        "body_truncated": len(text) > 200_000,
+        "size": len(r.content),
+    }
 
 
 @app.get("/metrics")
