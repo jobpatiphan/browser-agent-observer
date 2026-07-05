@@ -22,10 +22,14 @@ DASH_URL = os.environ.get("DASH_URL", "http://127.0.0.1:8790").rstrip("/")
 
 def _post(path, payload, timeout=0.4):
     try:
+        headers = {"content-type": "application/json"}
+        token = os.environ.get("DASH_TOKEN", "")
+        if token:
+            headers["authorization"] = f"Bearer {token}"
         req = urllib.request.Request(
             DASH_URL + path,
             data=json.dumps(payload).encode(),
-            headers={"content-type": "application/json"},
+            headers=headers,
             method="POST",
         )
         urllib.request.urlopen(req, timeout=timeout).read()

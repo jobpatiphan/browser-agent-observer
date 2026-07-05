@@ -38,6 +38,12 @@ _BACKEND = os.environ.get("DASH_BACKEND", "127.0.0.1:8790")
 BACKEND_HTTP = os.environ.get("DASH_BACKEND_HTTP", f"http://{_BACKEND}")
 BACKEND_WS = os.environ.get("DASH_INGEST_SCREENCAST_URL", f"ws://{_BACKEND}/ingest/screencast")
 
+# Optional shared-token auth (matches the backend's DASH_TOKEN).
+DASH_TOKEN = os.environ.get("DASH_TOKEN", "")
+if DASH_TOKEN:
+    BACKEND_WS += ("&" if "?" in BACKEND_WS else "?") + f"token={DASH_TOKEN}"
+_AUTH_HEADERS = {"Authorization": f"Bearer {DASH_TOKEN}"} if DASH_TOKEN else {}
+
 RETRY_DELAY = 2
 HIGHLIGHT_POLL_SECONDS = 0.15   # imperceptible vs the 2-5fps hybrid feed
 TAB_POLL_SECONDS = 1.0          # how often we publish the tab list / check selection
@@ -224,6 +230,38 @@ async def stream_screencast(client, http, tab):
                     log.debug("highlight poll failed", exc_info=True)
                 await asyncio.sleep(HIGHLIGHT_POLL_SECONDS)
 
+        async def do_snapshot(http, label):
+            # Force a crisp frame + grab the live DOM/title/url in one round-trip,
+            # and hand it back to the backend to store on the timeline.
+            try:
+                await capture_hq(force=True)
+                data = {}
+                try:
+                    expr = ("JSON.stringify({title:document.title,url:location.href,"
+                            "html:document.documentElement.outerHTML.slice(0,300000)})")
+                    r = await send("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+                    val = (r.get("result", {}) or {}).get("value")
+                    if val:
+                        data = json.loads(val)
+                except Exception:
+                    log.debug("snapshot DOM grab failed", exc_info=True)
+                await http.post(f"{BACKEND_HTTP}/snapshot-result", json={
+                    "label": label, "url": data.get("url"),
+                    "title": data.get("title"), "html": data.get("html"),
+                })
+            except Exception:
+                log.exception("snapshot failed")
+
+        async def poll_snapshots(http):
+            while True:
+                try:
+                    r = await http.get(f"{BACKEND_HTTP}/pending-snapshots")
+                    for s in r.json().get("snapshots", []):
+                        await do_snapshot(http, s.get("label", ""))
+                except Exception:
+                    log.debug("snapshot poll failed", exc_info=True)
+                await asyncio.sleep(HIGHLIGHT_POLL_SECONDS)
+
         async def post_navigate(http, url):
             # Passive fallback: even with no cooperating driver, a plain page
             # navigation still lands a marker on the timeline.
@@ -295,6 +333,7 @@ async def stream_screencast(client, http, tab):
 
         recv_task = asyncio.create_task(recv_loop())
         poll_task = asyncio.create_task(poll_highlights(http))
+        snap_task = asyncio.create_task(poll_snapshots(http))
         tabs_task = asyncio.create_task(poll_tabs())
         switch_task = asyncio.create_task(switch.wait())
         try:
@@ -306,7 +345,7 @@ async def stream_screencast(client, http, tab):
             # Run until the CDP connection ends OR the user switches tabs.
             await asyncio.wait({recv_task, switch_task}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            for t in (recv_task, poll_task, tabs_task, switch_task):
+            for t in (recv_task, poll_task, snap_task, tabs_task, switch_task):
                 t.cancel()
             if quiet_task:
                 quiet_task.cancel()
@@ -317,7 +356,7 @@ async def main():
     client = ReconnectingWSClient(BACKEND_WS, maxsize=5, drop_oldest=True, name="screencast-ws")
     client.start()
     # One shared HTTP client across reconnects/tab-switches (owned here).
-    async with httpx.AsyncClient(timeout=2.0) as http:
+    async with httpx.AsyncClient(timeout=2.0, headers=_AUTH_HEADERS) as http:
         while True:
             try:
                 target = await choose_target(http)

@@ -15,7 +15,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -47,6 +47,17 @@ ALLOWED_WS_ORIGINS |= {
     o.strip() for o in os.environ.get("DASH_ALLOWED_ORIGINS", "").split(",") if o.strip()
 }
 
+# Optional shared-token auth. Empty (default) = wide open, which is fine on
+# loopback. Set DASH_TOKEN to gate the HTTP API + websockets when binding beyond
+# 127.0.0.1 (the UI shell and /healthz stay reachable so the page can bootstrap
+# and then supply the token via ?token= / Authorization: Bearer).
+DASH_TOKEN = os.environ.get("DASH_TOKEN", "")
+
+# Optional durability. Set PERSIST_DIR to append this session's events (minus
+# bulky screencast frames) to a JSONL file so it can be reopened later; unset
+# (default) keeps everything in memory only.
+PERSIST_DIR = os.environ.get("PERSIST_DIR", "")
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -61,8 +72,31 @@ actions: "deque[dict]" = deque(maxlen=200)
 commands: "deque[dict]" = deque(maxlen=200)
 findings: "deque[dict]" = deque(maxlen=300)
 _finding_ids: set[str] = set()   # dedup guard so a finding isn't stored twice
+snapshots: "deque[dict]" = deque(maxlen=50)
 pending_highlights: "deque[dict]" = deque(maxlen=50)
+pending_snapshots: "deque[dict]" = deque(maxlen=20)
 dashboard_clients: set[WebSocket] = set()
+
+# Per-session JSONL sink (opened once if PERSIST_DIR is set).
+_session_file: Path | None = None
+if PERSIST_DIR:
+    try:
+        Path(PERSIST_DIR).mkdir(parents=True, exist_ok=True)
+        _session_file = Path(PERSIST_DIR) / f"session-{int(START_TIME)}.jsonl"
+    except Exception:
+        log.exception("could not open PERSIST_DIR %s", PERSIST_DIR)
+
+
+def _persist(event: dict):
+    # Append every event except bulky screencast frames so a session can be
+    # reopened later. Best-effort — never let disk trouble break the live feed.
+    if _session_file is None or event.get("type") == "frame":
+        return
+    try:
+        with _session_file.open("a") as fh:
+            fh.write(json.dumps(event) + "\n")
+    except Exception:
+        log.debug("persist failed", exc_info=True)
 
 latest_tabs: list = []       # most recent CDP page-target list from the forwarder
 selected_target: str = ""    # "" = auto-follow; else a specific CDP target id
@@ -74,6 +108,32 @@ def _origin_ok(ws: WebSocket) -> bool:
     # `websockets` library) send no Origin header at all — allow those; only
     # reject a *present* Origin that isn't ours.
     return origin is None or origin in ALLOWED_WS_ORIGINS
+
+
+def _http_authed(request) -> bool:
+    if not DASH_TOKEN:
+        return True
+    p = request.url.path
+    # Let the UI shell + liveness load unauthenticated so the page can bootstrap
+    # and then present the token on the API/websocket.
+    if p == "/" or p == "/healthz" or p.startswith("/static/"):
+        return True
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer ") and auth[7:] == DASH_TOKEN:
+        return True
+    return request.query_params.get("token") == DASH_TOKEN
+
+
+def _ws_authed(ws: WebSocket) -> bool:
+    return not DASH_TOKEN or ws.query_params.get("token") == DASH_TOKEN
+
+
+@app.middleware("http")
+async def _auth_mw(request, call_next):
+    if not _http_authed(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 @app.get("/")
@@ -110,6 +170,7 @@ async def _emit_findings(flow: dict):
 
 
 async def _broadcast(message: dict):
+    _persist(message)
     dead = []
     # Snapshot: two ingest sources (mitmproxy + screencast) broadcast
     # concurrently, and a tab connecting/disconnecting mid-send mutates the set
@@ -126,7 +187,7 @@ async def _broadcast(message: dict):
 
 @app.websocket("/ws/dashboard")
 async def ws_dashboard(ws: WebSocket):
-    if not _origin_ok(ws):
+    if not _origin_ok(ws) or not _ws_authed(ws):
         await ws.close(code=4003)
         return
     await ws.accept()
@@ -164,7 +225,7 @@ async def ws_dashboard(ws: WebSocket):
 
 @app.websocket("/ingest/mitmproxy")
 async def ingest_mitmproxy(ws: WebSocket):
-    if not _origin_ok(ws):
+    if not _origin_ok(ws) or not _ws_authed(ws):
         await ws.close(code=4003)
         return
     await ws.accept()
@@ -187,7 +248,7 @@ async def ingest_mitmproxy(ws: WebSocket):
 @app.websocket("/ingest/screencast")
 async def ingest_screencast(ws: WebSocket):
     global latest_frame, latest_tabs
-    if not _origin_ok(ws):
+    if not _origin_ok(ws) or not _ws_authed(ws):
         await ws.close(code=4003)
         return
     await ws.accept()
@@ -288,6 +349,90 @@ async def get_findings():
     return {"findings": sorted(findings, key=findings_engine.sort_key)}
 
 
+def _body_text(side: dict) -> str:
+    b = (side or {}).get("body")
+    return b if isinstance(b, str) else ""
+
+
+@app.get("/search")
+async def search(q: str, limit: int = 100):
+    # One box across everything captured: traffic (url + bodies), WS frames,
+    # narration, commands and findings. Case-insensitive substring.
+    ql = q.lower().strip()
+    results = []
+    if ql:
+        for f in flows:
+            hay = f"{f.get('method','')} {f.get('url','')} {f.get('status','')}".lower()
+            body = (_body_text(f.get("request")) + " " + _body_text(f.get("response"))).lower()
+            if ql in hay or ql in body:
+                results.append({"kind": "flow", "ts": f.get("ts"), "ref": f.get("id"),
+                                "label": f"{f.get('method')} {f.get('url')} [{f.get('status')}]"})
+        for m in ws_messages:
+            if ql in str(m.get("payload", "")).lower() or ql in str(m.get("url", "")).lower():
+                results.append({"kind": "ws", "ts": m.get("ts"), "ref": m.get("id"),
+                                "label": str(m.get("payload", ""))[:120]})
+        for n in narration:
+            if ql in (n.get("text") or "").lower():
+                results.append({"kind": "narration", "ts": n.get("ts"), "label": n.get("text")})
+        for c in commands:
+            if ql in (c.get("cmd") or "").lower():
+                results.append({"kind": "command", "ts": c.get("ts"), "label": c.get("cmd")})
+        for f in findings:
+            blob = f"{f.get('title','')} {f.get('detail','')} {f.get('url','')}".lower()
+            if ql in blob:
+                results.append({"kind": "finding", "ts": f.get("ts"), "ref": f.get("flow_id"),
+                                "label": f"{f.get('severity')}: {f.get('title')}"})
+    results.sort(key=lambda r: r.get("ts") or 0, reverse=True)
+    return {"query": q, "count": len(results), "results": results[:limit]}
+
+
+class SnapshotBody(BaseModel):
+    label: str | None = None
+
+
+@app.post("/snapshot")
+async def snapshot(body: SnapshotBody):
+    # Queue a request the screencast forwarder drains (like highlights): it
+    # grabs a crisp HQ frame + the page DOM and posts it back to /snapshot-result.
+    pending_snapshots.append({"label": body.label or "", "ts": int(time.time() * 1000)})
+    return {"ok": True}
+
+
+@app.get("/pending-snapshots")
+async def get_pending_snapshots():
+    items = list(pending_snapshots)
+    pending_snapshots.clear()
+    return {"snapshots": items}
+
+
+class SnapshotResult(BaseModel):
+    label: str | None = None
+    url: str | None = None
+    title: str | None = None
+    html: str | None = None
+
+
+@app.post("/snapshot-result")
+async def snapshot_result(body: SnapshotResult):
+    snap = {
+        "type": "snapshot", "ts": int(time.time() * 1000),
+        "label": body.label or "", "url": body.url, "title": body.title,
+        "html": (body.html or "")[:200_000],
+    }
+    snapshots.append(snap)
+    # A timeline marker so the snapshot shows up in Activity live.
+    marker = {"type": "narration", "ts": snap["ts"], "level": "info",
+              "text": f"📸 snapshot {snap['label']}: {body.title or body.url or ''}".strip()}
+    narration.append(marker)
+    await _broadcast(marker)
+    return {"ok": True}
+
+
+@app.get("/snapshots")
+async def get_snapshots():
+    return {"snapshots": list(snapshots)}
+
+
 @app.get("/pending-highlights")
 async def get_pending_highlights():
     # Drain-on-read: the forwarder pulls whatever accumulated since last poll.
@@ -378,7 +523,46 @@ async def export(redact: bool = False):
         "actions": list(actions),
         "commands": list(commands),
         "findings": sorted(findings, key=findings_engine.sort_key),
+        "snapshots": list(snapshots),
     }
+
+
+@app.get("/sessions")
+async def list_sessions():
+    if not _session_file:
+        return {"sessions": []}
+    out = []
+    for p in sorted(Path(PERSIST_DIR).glob("session-*.jsonl")):
+        st = p.stat()
+        out.append({"name": p.name, "size": st.st_size, "mtime": int(st.st_mtime)})
+    return {"sessions": out}
+
+
+@app.get("/sessions/{name}")
+async def get_session(name: str):
+    # Read a persisted JSONL back into an /export-shaped snapshot so the same
+    # replay machinery can reopen a past session.
+    if not PERSIST_DIR:
+        raise HTTPException(404, "persistence disabled")
+    p = Path(PERSIST_DIR) / os.path.basename(name)   # basename blocks traversal
+    if not p.is_file():
+        raise HTTPException(404, "no such session")
+    grouped: dict = {"flows": [], "ws": [], "narration": [], "actions": [],
+                     "commands": [], "findings": [], "snapshots": []}
+    bucket = {"ws": "ws", "narration": "narration", "action": "actions",
+              "command": "commands", "finding": "findings", "snapshot": "snapshots"}
+    for line in p.read_text().splitlines():
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        t = e.get("type")
+        if t == "flow" and e.get("phase") == "response":
+            grouped["flows"].append(e)
+        elif t in bucket:
+            grouped[bucket[t]].append(e)
+    grouped["meta"] = {"name": os.path.basename(name), "replayed": True}
+    return grouped
 
 
 @app.get("/metrics")

@@ -8,6 +8,7 @@ to a bounded queue that a background-thread ReconnectingWSClient drains,
 so the proxy keeps working even if the dashboard backend is down/restarting.
 """
 import base64
+import fnmatch
 import logging
 import os
 import sys
@@ -22,6 +23,23 @@ log = logging.getLogger(__name__)
 # Where the dashboard backend lives (host:port). Overridable via env.
 _BACKEND = os.environ.get("DASH_BACKEND", "127.0.0.1:8790")
 BACKEND_WS = os.environ.get("DASH_INGEST_MITM_URL", f"ws://{_BACKEND}/ingest/mitmproxy")
+
+# Optional shared-token auth (matches the backend's DASH_TOKEN).
+_DASH_TOKEN = os.environ.get("DASH_TOKEN", "")
+if _DASH_TOKEN:
+    BACKEND_WS += ("&" if "?" in BACKEND_WS else "?") + f"token={_DASH_TOKEN}"
+
+# Optional capture scope: comma-separated host globs (e.g. "*.target.com,10.0.0.*").
+# Empty = capture everything (default). Keeps out-of-scope noise off the timeline.
+SCOPE_HOSTS = [h.strip().lower() for h in os.environ.get("SCOPE_HOSTS", "").split(",") if h.strip()]
+
+
+def _in_scope(host: str) -> bool:
+    if not SCOPE_HOSTS:
+        return True
+    host = (host or "").lower()
+    return any(fnmatch.fnmatch(host, pat) for pat in SCOPE_HOSTS)
+
 
 MAX_BODY_BYTES = 200_000
 PREVIEW_BYTES = 20_000
@@ -87,6 +105,8 @@ class DashboardAddon:
         self.client.start()
 
     def request(self, flow):
+        if SCOPE_HOSTS and not _in_scope(flow.request.host):
+            return
         self._start_ts[flow.id] = time.time()
         req = flow.request
         event = {
@@ -101,6 +121,8 @@ class DashboardAddon:
         self.client.send(event)
 
     def response(self, flow):
+        if SCOPE_HOSTS and not _in_scope(flow.request.host):
+            return
         req = flow.request
         resp = flow.response
         started = self._start_ts.pop(flow.id, None)
@@ -139,6 +161,8 @@ class DashboardAddon:
         self.client.send(event)
 
     def error(self, flow):
+        if SCOPE_HOSTS and not _in_scope(flow.request.host):
+            return
         # A flow that errors out (connection reset, TLS failure, timeout) never
         # reaches response(), so its start timestamp would leak forever. Clean
         # it up and tell the UI to flip the pending row to "failed".
@@ -151,6 +175,8 @@ class DashboardAddon:
         })
 
     def websocket_message(self, flow):
+        if SCOPE_HOSTS and not _in_scope(flow.request.host):
+            return
         # Modern agents talk over WebSockets a lot; surface each frame so the
         # dashboard shows the live stream, not just the upgrade handshake.
         msg = flow.websocket.messages[-1]

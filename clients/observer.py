@@ -25,10 +25,14 @@ class Observer:
 
     def _post(self, path: str, payload: dict) -> None:
         try:
+            headers = {"content-type": "application/json"}
+            token = os.environ.get("DASH_TOKEN", "")
+            if token:
+                headers["authorization"] = f"Bearer {token}"
             req = urllib.request.Request(
                 self.base + path,
                 data=json.dumps(payload).encode(),
-                headers={"content-type": "application/json"},
+                headers=headers,
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=2).read()
