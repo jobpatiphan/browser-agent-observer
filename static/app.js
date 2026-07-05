@@ -881,5 +881,48 @@ function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<
     }
   });
 
+  // ---- resizable panes (drag the splitters, dbl-click to reset) ---------
+  (function initResizers() {
+    const layout = document.getElementById("layout");
+    // restore saved sizes
+    const savedL = localStorage.getItem("bao_left_w");
+    const savedT = localStorage.getItem("bao_top_h");
+    if (savedL) layout.style.setProperty("--left-w", savedL);
+    if (savedT) layout.style.setProperty("--top-h", savedT);
+
+    function drag(gutter, axis, varName, saveKey) {
+      if (!gutter) return;
+      gutter.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        gutter.classList.add("dragging");
+        const rect = layout.getBoundingClientRect();
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = axis === "x" ? "col-resize" : "row-resize";
+        function move(ev) {
+          const val = axis === "x"
+            ? Math.max(220, Math.min(rect.width - 280, ev.clientX - rect.left))
+            : Math.max(120, Math.min(rect.height - 140, ev.clientY - rect.top));
+          layout.style.setProperty(varName, val + "px");
+        }
+        function up() {
+          document.removeEventListener("mousemove", move);
+          document.removeEventListener("mouseup", up);
+          document.body.style.userSelect = "";
+          document.body.style.cursor = "";
+          gutter.classList.remove("dragging");
+          localStorage.setItem(saveKey, layout.style.getPropertyValue(varName));
+        }
+        document.addEventListener("mousemove", move);
+        document.addEventListener("mouseup", up);
+      });
+      gutter.addEventListener("dblclick", () => {
+        layout.style.removeProperty(varName);
+        localStorage.removeItem(saveKey);
+      });
+    }
+    drag(document.getElementById("vgut"), "x", "--left-w", "bao_left_w");
+    drag(document.getElementById("hgut"), "y", "--top-h", "bao_top_h");
+  })();
+
   connect();
 })();
