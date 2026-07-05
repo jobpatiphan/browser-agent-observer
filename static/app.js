@@ -427,7 +427,39 @@
       addCommand(event);
     } else if (event.type === "ws") {
       addWsMessage(event);
+    } else if (event.type === "tabs") {
+      renderTabs(event);
     }
+  }
+
+  // ---- tab selector (multi-tab following) -------------------------------
+  const tabSelect = document.getElementById("tab-select");
+  let lastTabsKey = "";
+  tabSelect.addEventListener("change", () => {
+    const v = tabSelect.value;
+    fetch("/select-tab", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetId: v === "auto" ? null : v }),
+    });
+  });
+
+  function renderTabs(event) {
+    const tabs = event.tabs || [];
+    // Only rebuild when the set/selection actually changes, so a 1s poll
+    // doesn't fight the user mid-click.
+    const key = tabs.map((t) => t.id).join(",") + "|" + (event.selected || "") + "|" + (event.current || "");
+    if (key === lastTabsKey) return;
+    lastTabsKey = key;
+    if (tabs.length <= 1) { tabSelect.style.display = "none"; return; }
+    tabSelect.style.display = "";
+    tabSelect.innerHTML =
+      '<option value="auto">▾ auto-follow</option>' +
+      tabs.map((t) => {
+        const label = (t.title || t.url || t.id || "").slice(0, 46);
+        const dot = t.id === event.current ? " ●" : "";
+        return `<option value="${escapeHtml(t.id)}">${escapeHtml(label)}${dot}</option>`;
+      }).join("");
+    tabSelect.value = event.selected || "auto";
   }
 
   function addWsMessage(event) {

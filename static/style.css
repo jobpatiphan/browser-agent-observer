@@ -139,6 +139,13 @@ section h2 {
   margin-left: 6px;
   vertical-align: middle;
 }
+.tab-select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: 11px; padding: 1px 4px; margin-left: 8px;
+  max-width: 320px; vertical-align: middle;
+}
+
 .badge-live { background: #0d1f0d; color: var(--green); }
 .badge-hq { background: #1a2436; color: var(--blue); }
 .badge-paused { background: #2a230d; color: var(--orange); }

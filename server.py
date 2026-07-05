@@ -60,6 +60,9 @@ commands: "deque[dict]" = deque(maxlen=200)
 pending_highlights: "deque[dict]" = deque(maxlen=50)
 dashboard_clients: set[WebSocket] = set()
 
+latest_tabs: list = []       # most recent CDP page-target list from the forwarder
+selected_target: str = ""    # "" = auto-follow; else a specific CDP target id
+
 
 def _origin_ok(ws: WebSocket) -> bool:
     origin = ws.headers.get("origin")
@@ -115,6 +118,8 @@ async def ws_dashboard(ws: WebSocket):
         await ws.send_json(m)
     # Only replay the single latest frame (not all of frame_history — that can
     # be several MB); the filmstrip lazily fetches thumbnails via /history.
+    if latest_tabs:
+        await ws.send_json({"type": "tabs", "tabs": latest_tabs, "selected": selected_target or None})
     if latest_frame is not None:
         await ws.send_json(latest_frame)
     for n in narration:
@@ -159,7 +164,7 @@ async def ingest_mitmproxy(ws: WebSocket):
 
 @app.websocket("/ingest/screencast")
 async def ingest_screencast(ws: WebSocket):
-    global latest_frame
+    global latest_frame, latest_tabs
     if not _origin_ok(ws):
         await ws.close(code=4003)
         return
@@ -168,6 +173,10 @@ async def ingest_screencast(ws: WebSocket):
         while True:
             raw = await ws.receive_text()
             event = json.loads(raw)
+            if event.get("type") == "tabs":
+                latest_tabs = event.get("tabs", [])
+                await _broadcast(event)
+                continue
             latest_frame = event
             frame_history.append(event)
             await _broadcast(event)
@@ -229,6 +238,23 @@ async def action(body: ActionBody):
             "x": body.coords.x, "y": body.coords.y, "w": body.w, "h": body.h,
         })
     return {"ok": True}
+
+
+class SelectTabBody(BaseModel):
+    targetId: str | None = None
+
+
+@app.post("/select-tab")
+async def select_tab(body: SelectTabBody):
+    # UI picks which browser tab to mirror; the forwarder polls /selected-tab.
+    global selected_target
+    selected_target = body.targetId or ""
+    return {"ok": True, "targetId": selected_target or None}
+
+
+@app.get("/selected-tab")
+async def get_selected_tab():
+    return {"targetId": selected_target or None}
 
 
 @app.get("/pending-highlights")

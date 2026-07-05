@@ -41,6 +41,7 @@ BACKEND_WS = os.environ.get("DASH_INGEST_SCREENCAST_URL", f"ws://{_BACKEND}/inge
 
 RETRY_DELAY = 2
 HIGHLIGHT_POLL_SECONDS = 0.15   # imperceptible vs the 2-5fps hybrid feed
+TAB_POLL_SECONDS = 1.0          # how often we publish the tab list / check selection
 HIGHLIGHT_HOLD_SECONDS = 0.5    # how long an injected highlight stays up
 
 # Injected into the page to draw the highlight box + a click ripple, both
@@ -78,23 +79,39 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
-def find_page_target():
+def get_page_targets():
     tabs = json.loads(urllib.request.urlopen(f"{CDP_HOST}/json", timeout=5).read())
-    pages = [t for t in tabs if t.get("type") == "page"]
+    return [t for t in tabs if t.get("type") == "page"]
+
+
+async def get_selected(http):
+    try:
+        r = await http.get(f"{BACKEND_HTTP}/selected-tab")
+        return r.json().get("targetId")
+    except Exception:
+        return None
+
+
+async def choose_target(http):
+    """Pick which tab to mirror: the UI's explicit choice if still open, else
+    auto — prefer a real navigated page over about:blank / devtools."""
+    pages = get_page_targets()
     if not pages:
         return None
-    # Prefer a real navigated page over about:blank / devtools / new-tab, so we
-    # don't screencast a blank tab when the agent is driving another one.
+    sel = await get_selected(http)
+    if sel:
+        for t in pages:
+            if t.get("id") == sel:
+                return t
     for t in pages:
         if (t.get("url") or "").startswith(("http://", "https://")):
             return t
     return pages[0]
 
 
-async def stream_screencast(client: ReconnectingWSClient):
-    tab = find_page_target()
-    if tab is None:
-        return False
+async def stream_screencast(client, http, tab):
+    current_id = tab.get("id")
+    switch = asyncio.Event()   # set when we should detach and pick another tab
 
     async with websockets.connect(tab["webSocketDebuggerUrl"], max_size=50 * 1024 * 1024,
                                    ping_timeout=30) as ws:
@@ -210,7 +227,26 @@ async def stream_screencast(client: ReconnectingWSClient):
             except Exception:
                 log.debug("post_navigate failed", exc_info=True)
 
-        http = httpx.AsyncClient(timeout=2.0)
+        async def poll_tabs():
+            # Publish the live tab list to the dashboard and honor the user's
+            # tab choice. Detach (switch) when the selection changes to another
+            # open tab, or when our current tab closes, so main() re-attaches.
+            while True:
+                try:
+                    pages = get_page_targets()
+                    client.send({
+                        "type": "tabs", "ts": _now_ms(), "current": current_id,
+                        "tabs": [{"id": t.get("id"), "title": t.get("title", ""),
+                                  "url": t.get("url", "")} for t in pages],
+                    })
+                    ids = {t.get("id") for t in pages}
+                    sel = await get_selected(http)
+                    if (sel and sel != current_id and sel in ids) or (current_id not in ids):
+                        switch.set()
+                        return
+                except Exception:
+                    log.debug("tab poll failed", exc_info=True)
+                await asyncio.sleep(TAB_POLL_SECONDS)
 
         async def recv_loop():
             nonlocal quiet_task, active_until
@@ -253,31 +289,37 @@ async def stream_screencast(client: ReconnectingWSClient):
 
         recv_task = asyncio.create_task(recv_loop())
         poll_task = asyncio.create_task(poll_highlights(http))
+        tabs_task = asyncio.create_task(poll_tabs())
+        switch_task = asyncio.create_task(switch.wait())
         try:
             await send("Page.enable")
             await send("Runtime.enable")
             await refresh_layout()
             await send("Page.startScreencast", SCREENCAST_PARAMS)
             await capture_hq()   # crisp first paint immediately
-            await recv_task
+            # Run until the CDP connection ends OR the user switches tabs.
+            await asyncio.wait({recv_task, switch_task}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            recv_task.cancel()
-            poll_task.cancel()
+            for t in (recv_task, poll_task, tabs_task, switch_task):
+                t.cancel()
             if quiet_task:
                 quiet_task.cancel()
-            await http.aclose()
     return True
 
 
 async def main():
     client = ReconnectingWSClient(BACKEND_WS, maxsize=5, drop_oldest=True, name="screencast-ws")
     client.start()
-    while True:
-        try:
-            await stream_screencast(client)
-        except Exception:
-            log.exception("screencast session ended with error")
-        await asyncio.sleep(RETRY_DELAY)
+    # One shared HTTP client across reconnects/tab-switches (owned here).
+    async with httpx.AsyncClient(timeout=2.0) as http:
+        while True:
+            try:
+                target = await choose_target(http)
+                if target is not None:
+                    await stream_screencast(client, http, target)
+            except Exception:
+                log.exception("screencast session ended with error")
+            await asyncio.sleep(RETRY_DELAY)
 
 
 if __name__ == "__main__":
