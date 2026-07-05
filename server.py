@@ -51,6 +51,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 START_TIME = time.time()
 
 flows: "deque[dict]" = deque(maxlen=500)
+ws_messages: "deque[dict]" = deque(maxlen=500)
 frame_history: "deque[dict]" = deque(maxlen=60)
 latest_frame: dict | None = None
 narration: "deque[dict]" = deque(maxlen=200)
@@ -110,6 +111,8 @@ async def ws_dashboard(ws: WebSocket):
     # Replay history so a freshly opened tab isn't starting blank.
     for f in flows:
         await ws.send_json(f)
+    for m in ws_messages:
+        await ws.send_json(m)
     # Only replay the single latest frame (not all of frame_history — that can
     # be several MB); the filmstrip lazily fetches thumbnails via /history.
     if latest_frame is not None:
@@ -143,7 +146,9 @@ async def ingest_mitmproxy(ws: WebSocket):
         while True:
             raw = await ws.receive_text()
             event = json.loads(raw)
-            if event.get("phase") == "response":
+            if event.get("type") == "ws":
+                ws_messages.append(event)
+            elif event.get("phase") == "response":
                 flows.append(event)
             await _broadcast(event)
     except WebSocketDisconnect:
@@ -253,6 +258,7 @@ async def export():
         "meta": {"exported_ts": int(time.time() * 1000),
                  "uptime_s": round(time.time() - START_TIME, 1)},
         "flows": list(flows),
+        "ws": list(ws_messages),
         "frames": list(frame_history),
         "narration": list(narration),
         "actions": list(actions),

@@ -21,6 +21,9 @@
   const tabResponse = document.getElementById("tab-response");
   const tabCookies = document.getElementById("tab-cookies");
   const tabTiming = document.getElementById("tab-timing");
+  const tabWs = document.getElementById("tab-ws");
+  const tabBtnWs = document.getElementById("tab-btn-ws");
+  let openDetailId = null;
   document.getElementById("detail-close").addEventListener("click", () => {
     overlay.classList.add("hidden");
   });
@@ -85,6 +88,7 @@
 
   const rowsById = new Map();
   const flowDataById = new Map();
+  const wsById = new Map();      // flow id -> [ws message events]
   let flowCount = 0;
 
   function statusClass(status) {
@@ -202,11 +206,21 @@
   function showDetail(id) {
     const event = flowDataById.get(id);
     if (!event) return;
+    openDetailId = id;
     detailTitle.textContent = `${event.method} ${event.url} — ${event.status ?? "-"}`;
     tabRequest.textContent = renderSide(event.request);
     tabResponse.textContent = renderSide(event.response);
     renderCookies(event);
     renderTiming(event);
+    // WebSocket tab only when this flow actually carried frames.
+    const wsList = wsById.get(id);
+    if (wsList && wsList.length) {
+      tabBtnWs.classList.remove("hidden");
+      tabBtnWs.textContent = `WebSocket (${wsList.length})`;
+      renderWs(id);
+    } else {
+      tabBtnWs.classList.add("hidden");
+    }
     // reset to the Request tab
     document.querySelectorAll(".detail-tab").forEach((b, i) => b.classList.toggle("active", i === 0));
     document.querySelectorAll(".detail-view").forEach((v) => v.classList.add("hidden"));
@@ -411,7 +425,42 @@
       addAction(event);
     } else if (event.type === "command") {
       addCommand(event);
+    } else if (event.type === "ws") {
+      addWsMessage(event);
     }
+  }
+
+  function addWsMessage(event) {
+    let list = wsById.get(event.id);
+    if (!list) { list = []; wsById.set(event.id, list); }
+    list.push(event);
+    // Flag the originating row so you can see which flow is a live socket.
+    const row = rowsById.get(event.id);
+    if (row) {
+      row.classList.add("has-ws");
+      const first = row.firstElementChild;
+      if (first && !first.querySelector(".ws-badge")) {
+        first.insertAdjacentHTML("beforeend", ` <span class="ws-badge" title="WebSocket frames">⇅</span>`);
+      }
+    }
+    // If this flow's detail is open, live-append.
+    if (overlay.classList.contains("hidden") === false && openDetailId === event.id) {
+      renderWs(event.id);
+    }
+  }
+
+  function renderWs(id) {
+    const list = wsById.get(id) || [];
+    const rows = list.map((m) => {
+      const dir = m.from_client ? '<span class="ws-out">▲ client→server</span>'
+                                : '<span class="ws-in">▼ server→client</span>';
+      const body = m.encoding === "base64"
+        ? `[binary ${m.size}B]`
+        : escapeHtml(m.payload) + (m.truncated ? " …[truncated]" : "");
+      return `<div class="ws-msg"><div class="ws-meta">${dir}<span class="ws-t">${fmtTime(m.ts)}</span></div>` +
+             `<code>${body}</code></div>`;
+    }).join("");
+    tabWs.innerHTML = rows || '<div class="muted-block">no frames</div>';
   }
 
   // ---- session export (self-contained replay HTML) ----------------------

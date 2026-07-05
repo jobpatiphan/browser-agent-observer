@@ -26,6 +26,7 @@ BACKEND_WS = os.environ.get("DASH_INGEST_MITM_URL", f"ws://{_BACKEND}/ingest/mit
 MAX_BODY_BYTES = 200_000
 PREVIEW_BYTES = 20_000
 MAX_IMAGE_BYTES = 50_000
+WS_PREVIEW_CHARS = 4_000
 
 TEXT_TYPES = ("text/", "application/json", "application/xml", "application/javascript",
               "application/x-www-form-urlencoded")
@@ -141,6 +142,30 @@ class DashboardAddon:
             "phase": "error",
             "id": flow.id,
             "ts": int(time.time() * 1000),
+        })
+
+    def websocket_message(self, flow):
+        # Modern agents talk over WebSockets a lot; surface each frame so the
+        # dashboard shows the live stream, not just the upgrade handshake.
+        msg = flow.websocket.messages[-1]
+        data = msg.content or b""
+        try:
+            text = data.decode("utf-8")
+            is_text = True
+        except UnicodeDecodeError:
+            text, is_text = None, False
+        payload = (text[:WS_PREVIEW_CHARS] if is_text
+                   else base64.b64encode(data[:WS_PREVIEW_CHARS]).decode())
+        self.client.send({
+            "type": "ws",
+            "id": flow.id,
+            "ts": int(time.time() * 1000),
+            "from_client": bool(msg.from_client),
+            "encoding": "text" if is_text else "base64",
+            "payload": payload,
+            "truncated": len(data) > WS_PREVIEW_CHARS,
+            "size": len(data),
+            "url": flow.request.pretty_url,
         })
 
 

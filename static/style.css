@@ -390,3 +390,12 @@ table.kv td:first-child { color: var(--muted); }
 .sec-list li { padding: 3px 0; }
 .sec-ok { color: var(--green); }
 .sec-no { color: var(--red); }
+
+.ws-badge { color: var(--blue); font-weight: 700; }
+tbody tr.has-ws td:first-child { border-left: 2px solid var(--blue); }
+.ws-msg { margin: 4px 0; padding: 6px 8px; background: var(--bg-alt); border-radius: 4px; }
+.ws-meta { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 3px; }
+.ws-out { color: var(--orange); }
+.ws-in { color: var(--green); }
+.ws-t { color: var(--muted); }
+.ws-msg code { word-break: break-all; color: var(--text); white-space: pre-wrap; }
