@@ -9,11 +9,16 @@ thing. Three panes, computer-use style:
   settles), with in-page click highlights baked into the pixels and a
   scrubbable filmstrip.
 - **Traffic** — every HTTP request/response through a mitmproxy, Burp/ZAP-style:
-  filter/search, method/status colors, per-row security-header score, and a
-  detail view with Request / Response / Cookies / Timing tabs.
+  filter/search, method/status colors, per-row security-header score, captured
+  **WebSocket** frames, and a detail view with Request / Response / Cookies /
+  Timing / WebSocket tabs.
 - **Activity** — a timeline of narration, actions and commands your agent posts,
   plus auto-detected navigations. One-click **Export** to a self-contained
-  replay `.html`.
+  replay `.html` (with credential **redaction** and a frame scrubber synced to
+  traffic + activity).
+
+Multiple tabs? A dropdown picks which one to mirror (or auto-follows the active
+page). Frame capture tightens automatically during bursts of activity.
 
 It's **agent-agnostic**: the dashboard doesn't drive anything. It just observes
 a browser you point at it.
@@ -97,9 +102,12 @@ curl -sX POST localhost:8790/action -H 'content-type: application/json' \
 | `POST /action` | `{type, target?, coords?}` — click/type/scroll/navigate/key |
 | `POST /command` | `{cmd}` — shell command line (monospace) |
 | `GET /history` | recent frames (filmstrip lazy-load) |
-| `GET /export` | full session snapshot → self-contained replay `.html` |
+| `GET /export[?redact=1]` | full session snapshot → self-contained replay `.html`; `redact=1` masks credentials |
+| `POST /select-tab` | `{targetId}` — choose which browser tab to mirror (null = auto) |
 | `GET /metrics` | Prometheus-style gauges (flows, frames, clients, uptime) |
 | `GET /healthz` | liveness + counts |
+
+CLI export (no UI): `./run.sh export [--out file.html] [--no-redact]`.
 
 ## Auto-coordinate with Claude Code / Codex
 
