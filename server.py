@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
+import findings as findings_engine
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("dashboard")
 
@@ -57,6 +59,8 @@ latest_frame: dict | None = None
 narration: "deque[dict]" = deque(maxlen=200)
 actions: "deque[dict]" = deque(maxlen=200)
 commands: "deque[dict]" = deque(maxlen=200)
+findings: "deque[dict]" = deque(maxlen=300)
+_finding_ids: set[str] = set()   # dedup guard so a finding isn't stored twice
 pending_highlights: "deque[dict]" = deque(maxlen=50)
 dashboard_clients: set[WebSocket] = set()
 
@@ -92,6 +96,17 @@ async def healthz():
         "clients": len(dashboard_clients),
         "uptime_s": round(time.time() - START_TIME, 1),
     }
+
+
+async def _emit_findings(flow: dict):
+    # Passive security triage on each completed flow. New findings (deduped by
+    # id) are buffered and pushed to every dashboard tab like any other event.
+    for f in findings_engine.analyze(flow):
+        if f["id"] in _finding_ids:
+            continue
+        _finding_ids.add(f["id"])
+        findings.append(f)
+        await _broadcast(f)
 
 
 async def _broadcast(message: dict):
@@ -132,6 +147,8 @@ async def ws_dashboard(ws: WebSocket):
         await ws.send_json(a)
     for c in commands:
         await ws.send_json(c)
+    for f in findings:
+        await ws.send_json(f)
 
     dashboard_clients.add(ws)
     try:
@@ -159,6 +176,7 @@ async def ingest_mitmproxy(ws: WebSocket):
                 ws_messages.append(event)
             elif event.get("phase") == "response":
                 flows.append(event)
+                await _emit_findings(event)
             await _broadcast(event)
     except WebSocketDisconnect:
         pass
@@ -264,6 +282,12 @@ async def get_selected_tab():
     return {"targetId": selected_target or None}
 
 
+@app.get("/findings")
+async def get_findings():
+    # Most-severe first so the UI can render a triage-ordered list.
+    return {"findings": sorted(findings, key=findings_engine.sort_key)}
+
+
 @app.get("/pending-highlights")
 async def get_pending_highlights():
     # Drain-on-read: the forwarder pulls whatever accumulated since last poll.
@@ -353,6 +377,7 @@ async def export(redact: bool = False):
         "narration": list(narration),
         "actions": list(actions),
         "commands": list(commands),
+        "findings": sorted(findings, key=findings_engine.sort_key),
     }
 
 
@@ -369,6 +394,8 @@ async def metrics():
         f"dashboard_clients {len(dashboard_clients)}",
         "# TYPE dashboard_actions gauge",
         f"dashboard_actions {len(actions)}",
+        "# TYPE dashboard_findings gauge",
+        f"dashboard_findings {len(findings)}",
         "# TYPE dashboard_uptime_seconds counter",
         f"dashboard_uptime_seconds {round(time.time() - START_TIME, 1)}",
     ]
