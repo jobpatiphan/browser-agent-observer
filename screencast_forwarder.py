@@ -70,6 +70,8 @@ SCREENCAST_PARAMS = {
 }
 HQ_QUALITY = 88          # one-shot full-res screenshot quality
 QUIET_SECONDS = 0.4      # idle gap that means "the screen settled"
+QUIET_ACTIVE = 0.15      # tighter gap while there's recent activity (adaptive)
+ACTIVE_WINDOW = 3.0      # seconds an action keeps us in the responsive cadence
 
 
 def _now_ms():
@@ -100,6 +102,7 @@ async def stream_screencast(client: ReconnectingWSClient):
         pending = {}
         quiet_task = None
         capturing = False
+        active_until = 0.0     # while now < this, use the tighter HQ cadence
         # Cached from Page.getLayoutMetrics (once at start / on resize). Gives
         # real page dimensions for HQ frames (captureScreenshot carries none)
         # and the visualViewport scale used for DPR-correct highlights (Phase 2).
@@ -146,14 +149,16 @@ async def stream_screencast(client: ReconnectingWSClient):
             finally:
                 capturing = False
 
-        async def fire_after_quiet():
+        async def fire_after_quiet(quiet):
             try:
-                await asyncio.sleep(QUIET_SECONDS)
+                await asyncio.sleep(quiet)
             except asyncio.CancelledError:
                 return
             await capture_hq()
 
         async def show_highlight(h):
+            nonlocal active_until
+            active_until = time.time() + ACTIVE_WINDOW   # enter responsive cadence
             # In-page highlight baked into real pixels by injecting a DOM node
             # via Runtime.evaluate.
             #
@@ -208,7 +213,7 @@ async def stream_screencast(client: ReconnectingWSClient):
         http = httpx.AsyncClient(timeout=2.0)
 
         async def recv_loop():
-            nonlocal quiet_task
+            nonlocal quiet_task, active_until
             async for raw in ws:
                 msg = json.loads(raw)
                 mid = msg.get("id")
@@ -235,10 +240,12 @@ async def stream_screencast(client: ReconnectingWSClient):
                     # frames stop for QUIET_SECONDS, fire one HQ capture.
                     if quiet_task:
                         quiet_task.cancel()
-                    quiet_task = asyncio.create_task(fire_after_quiet())
+                    quiet = QUIET_ACTIVE if time.time() < active_until else QUIET_SECONDS
+                    quiet_task = asyncio.create_task(fire_after_quiet(quiet))
                 elif method == "Page.frameNavigated":
                     frame = msg["params"].get("frame", {})
                     if not frame.get("parentId"):   # main frame only
+                        active_until = time.time() + ACTIVE_WINDOW
                         await refresh_layout()
                         await post_navigate(http, frame.get("url"))
                 elif method == "Page.frameResized":
