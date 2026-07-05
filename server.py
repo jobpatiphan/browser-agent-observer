@@ -175,6 +175,9 @@ async def ingest_screencast(ws: WebSocket):
             event = json.loads(raw)
             if event.get("type") == "tabs":
                 latest_tabs = event.get("tabs", [])
+                # Annotate with the current selection so the UI can mark the
+                # pinned tab (the forwarder only reports which one it's mirroring).
+                event["selected"] = selected_target or None
                 await _broadcast(event)
                 continue
             latest_frame = event

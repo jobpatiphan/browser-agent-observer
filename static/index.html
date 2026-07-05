@@ -14,9 +14,11 @@
 
   <main id="layout">
     <section id="browser-pane">
-      <h2>Browser <span id="frame-badge" class="frame-badge"></span>
-        <select id="tab-select" class="tab-select" title="Which browser tab to mirror" style="display:none"></select>
-      </h2>
+      <h2>Browser <span id="frame-badge" class="frame-badge"></span></h2>
+      <div id="browser-chrome" class="hidden">
+        <div id="tab-strip" title="click a tab to mirror it; ‘auto’ follows the active page"></div>
+        <div id="omnibox"><span id="omni-lock"></span><span id="omni-url"></span></div>
+      </div>
       <div class="pane-body" id="browser-body">
         <div id="frame-wrap">
           <img id="browser-frame" alt="waiting for browser feed…">

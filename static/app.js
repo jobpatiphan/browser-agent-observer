@@ -312,6 +312,8 @@
     line.title = "jump to the closest traffic row";
     line.addEventListener("click", () => syncToTraffic(event.ts));
     if (event.coords) showCursor(event.coords);
+    // Snappy address-bar update on navigation (tabs poll would catch up in ~1s).
+    if (event.action === "navigate" && event.target) setOmni(event.target);
     markFilmstrip(event);
   }
 
@@ -432,34 +434,59 @@
     }
   }
 
-  // ---- tab selector (multi-tab following) -------------------------------
-  const tabSelect = document.getElementById("tab-select");
+  // ---- synthetic browser chrome: tab strip + omnibox (multi-tab) --------
+  const browserChrome = document.getElementById("browser-chrome");
+  const tabStrip = document.getElementById("tab-strip");
+  const omniLock = document.getElementById("omni-lock");
+  const omniUrl = document.getElementById("omni-url");
   let lastTabsKey = "";
-  tabSelect.addEventListener("change", () => {
-    const v = tabSelect.value;
+
+  function selectTab(targetId) {
     fetch("/select-tab", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ targetId: v === "auto" ? null : v }),
+      body: JSON.stringify({ targetId }),
     });
-  });
+  }
+
+  function setOmni(url) {
+    const https = /^https:/i.test(url || "");
+    omniLock.textContent = https ? "🔒" : (url ? "🌐" : "");
+    omniUrl.textContent = url || "";
+    omniUrl.title = url || "";
+  }
 
   function renderTabs(event) {
     const tabs = event.tabs || [];
-    // Only rebuild when the set/selection actually changes, so a 1s poll
+    // Only rebuild when the set/selection actually changes so a 1s poll
     // doesn't fight the user mid-click.
-    const key = tabs.map((t) => t.id).join(",") + "|" + (event.selected || "") + "|" + (event.current || "");
+    const key = tabs.map((t) => t.id + ":" + t.title + ":" + t.url).join("|") +
+      "|" + (event.selected || "") + "|" + (event.current || "");
     if (key === lastTabsKey) return;
     lastTabsKey = key;
-    if (tabs.length <= 1) { tabSelect.style.display = "none"; return; }
-    tabSelect.style.display = "";
-    tabSelect.innerHTML =
-      '<option value="auto">▾ auto-follow</option>' +
-      tabs.map((t) => {
-        const label = (t.title || t.url || t.id || "").slice(0, 46);
-        const dot = t.id === event.current ? " ●" : "";
-        return `<option value="${escapeHtml(t.id)}">${escapeHtml(label)}${dot}</option>`;
-      }).join("");
-    tabSelect.value = event.selected || "auto";
+    if (!tabs.length) { browserChrome.classList.add("hidden"); return; }
+    browserChrome.classList.remove("hidden");
+
+    // Address bar mirrors the currently-followed tab's URL.
+    const cur = tabs.find((t) => t.id === event.current);
+    setOmni(cur && cur.url);
+
+    // Tab strip: an "auto" chip + one chip per open tab.
+    const autoActive = !event.selected;
+    let html = `<button class="tab-chip auto${autoActive ? " active" : ""}" data-id="__auto__" title="auto-follow the active page">auto</button>`;
+    html += tabs.map((t) => {
+      const active = t.id === event.current;
+      const pinned = t.id === event.selected;
+      const label = escapeHtml((t.title || t.url || "tab").slice(0, 28));
+      return `<button class="tab-chip${active ? " active" : ""}${pinned ? " pinned" : ""}" ` +
+        `data-id="${escapeHtml(t.id)}" title="${escapeHtml(t.url || "")}">${label}</button>`;
+    }).join("");
+    tabStrip.innerHTML = html;
+    tabStrip.querySelectorAll(".tab-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        selectTab(id === "__auto__" ? null : id);
+      });
+    });
   }
 
   function addWsMessage(event) {

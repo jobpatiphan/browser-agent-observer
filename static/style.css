@@ -150,6 +150,34 @@ section h2 {
 .badge-hq { background: #1a2436; color: var(--blue); }
 .badge-paused { background: #2a230d; color: var(--orange); }
 
+/* Synthetic browser chrome (tab strip + address bar) above the mirror */
+#browser-chrome { background: var(--bg-alt); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+#browser-chrome.hidden { display: none; }
+#tab-strip {
+  display: flex; gap: 2px; padding: 5px 6px 0;
+  overflow-x: auto; overflow-y: hidden;
+}
+.tab-chip {
+  background: var(--bg); color: var(--muted);
+  border: 1px solid var(--border); border-bottom: none;
+  border-radius: 6px 6px 0 0; padding: 3px 10px;
+  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  max-width: 190px; overflow: hidden; text-overflow: ellipsis;
+}
+.tab-chip:hover { color: var(--text); }
+.tab-chip.active { color: var(--text); border-color: var(--accent); border-bottom: 1px solid var(--bg); margin-bottom: -1px; }
+.tab-chip.pinned::before { content: "📌 "; font-size: 9px; }
+.tab-chip.auto { border-radius: 5px; margin-right: 4px; }
+.tab-chip.auto.active { color: var(--accent); border-color: var(--accent); }
+#omnibox {
+  display: flex; align-items: center; gap: 6px;
+  margin: 5px 6px 6px; padding: 4px 10px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+  font-size: 11px; min-height: 22px;
+}
+#omni-lock { flex: 0 0 auto; font-size: 10px; }
+#omni-url { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Filmstrip */
 #filmstrip {
   display: flex;
