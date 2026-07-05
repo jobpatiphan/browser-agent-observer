@@ -9,10 +9,44 @@ Pure and defensive: it never raises and never does I/O, so the ingest path can
 call it inline. It's a *heuristic* triage aid, not a scanner — every finding is
 a lead to verify by hand, and false positives are expected.
 """
-from urllib.parse import urlsplit, parse_qsl
+import re
+from urllib.parse import urlsplit, parse_qsl, unquote
 
 # Severity ranking so the UI/export can sort most-serious first.
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
+
+# --- sensitive-data patterns (scanned in response bodies) ------------------
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_CC_RE = re.compile(r"\b(?:\d[ -]?){13,19}\b")
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
+_AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+_PRIVKEY_RE = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----")
+_PII_SEVERITY = {"email": "low", "JWT": "medium", "credit-card": "high",
+                 "AWS key": "high", "private key": "high"}
+
+# --- offensive payloads (scanned in the *request* the agent sent) ----------
+_ATTACK_PATTERNS = [
+    ("SQLi", re.compile(r"(?i)(union\s+select|'\s*or\s*'?1'?\s*=\s*'?1|sleep\(\s*\d|"
+                        r"information_schema|;\s*drop\s+table|benchmark\()")),
+    ("XSS", re.compile(r"(?i)(<script\b|onerror\s*=|javascript:|<svg[^>]+onload|"
+                       r"<img[^>]+src\s*=\s*x)")),
+    ("path-traversal", re.compile(r"(\.\./\.\./|\.\.%2f|/etc/passwd|\.\.\\)")),
+    ("command-injection", re.compile(r"(;\s*(id|whoami|cat\s)|\|\s*(id|whoami)|\$\([^)]+\))")),
+]
+
+
+def _luhn_ok(s: str) -> bool:
+    digits = [int(c) for c in s if c.isdigit()]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total, parity = 0, len(digits) % 2
+    for i, d in enumerate(digits):
+        if i % 2 == parity:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
 
 # Query-param names that should never travel in a URL (logged, cached, refererd).
 SECRET_PARAMS = {
@@ -180,6 +214,37 @@ def _analyze(flow: dict) -> list:
                                     "Request parameter reflected in response",
                                     f"value of '{k}' appears verbatim in the HTML — "
                                     "check for XSS / injection"))
+
+    # --- sensitive data leaking in the response body --------------------
+    if body:
+        kinds = []
+        if _EMAIL_RE.search(body):
+            kinds.append("email")
+        if any(_luhn_ok(m.group()) for m in _CC_RE.finditer(body)):
+            kinds.append("credit-card")
+        if _JWT_RE.search(body):
+            kinds.append("JWT")
+        if _AWS_KEY_RE.search(body):
+            kinds.append("AWS key")
+        if _PRIVKEY_RE.search(body):
+            kinds.append("private key")
+        if kinds:
+            sev = min((_PII_SEVERITY[k] for k in kinds), key=lambda s: SEVERITY_ORDER[s])
+            out.append(_finding(flow, sev, "pii-exposure",
+                                "Sensitive data in response body",
+                                "exposes: " + ", ".join(sorted(set(kinds)))))
+
+    # --- offensive payloads the agent itself sent (timeline signal) -----
+    # Decode the URL too: captured URLs keep payloads percent-encoded
+    # (%27%20OR…), which the literal signatures would otherwise miss.
+    req_body = _text_body(req)
+    haystack = f"{url} {unquote(url)} {req_body}"
+    for name, rx in _ATTACK_PATTERNS:
+        if rx.search(haystack):
+            out.append(_finding(flow, "info", f"attack-{name.lower()}",
+                                f"Agent sent a {name} payload",
+                                f"request carries a {name} signature — offensive test "
+                                "by the agent, verify the target's response"))
 
     return out
 

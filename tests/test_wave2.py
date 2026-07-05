@@ -45,6 +45,26 @@ def test_sessions_empty_without_persistence():
     assert client.get("/sessions/whatever.jsonl").status_code == 404
 
 
+def test_har_export_shape():
+    with client.websocket_connect("/ingest/mitmproxy") as ws:
+        ws.send_json({
+            "type": "flow", "phase": "response", "id": "har1", "ts": 1700000000000,
+            "method": "POST", "url": "https://t/api?x=1", "path": "/api", "status": 201,
+            "size": 12, "duration_ms": 7,
+            "request": {"headers": [["content-type", "application/json"]],
+                        "content_type": "application/json", "body": '{"a":1}'},
+            "response": {"headers": [["server", "nginx"]], "content_type": "application/json",
+                         "body": "{}", "size": 2},
+        })
+    har = client.get("/export.har").json()
+    assert har["log"]["version"] == "1.2"
+    entry = next(e for e in har["log"]["entries"] if e["request"]["url"] == "https://t/api?x=1")
+    assert entry["request"]["method"] == "POST"
+    assert entry["request"]["queryString"] == [{"name": "x", "value": "1"}]
+    assert entry["request"]["postData"]["text"] == '{"a":1}'
+    assert entry["response"]["status"] == 201
+
+
 def test_replay_headers_strips_hop_by_hop():
     hdrs = server._replay_headers([
         ["Host", "t"], ["Content-Length", "5"], ["Authorization", "Bearer x"],

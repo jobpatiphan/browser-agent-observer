@@ -88,6 +88,33 @@ def test_clean_json_response_has_no_findings():
     assert findings.analyze(f) == []
 
 
+def test_pii_credit_card_high():
+    # 4111 1111 1111 1111 is a valid Luhn test Visa number
+    f = _flow(response={"headers": [], "content_type": "application/json",
+                        "body": '{"card":"4111 1111 1111 1111"}', "body_encoding": "text"})
+    fs = {x["kind"]: x for x in findings.analyze(f)}
+    assert "pii-exposure" in fs and fs["pii-exposure"]["severity"] == "high"
+
+
+def test_pii_ignores_non_luhn_digits():
+    f = _flow(response={"headers": [], "content_type": "application/json",
+                        "body": '{"id":"1234567890123456"}', "body_encoding": "text"})
+    assert "pii-exposure" not in _kinds(f)
+
+
+def test_attack_sqli_in_request_url():
+    f = _flow(url="https://t/item?id=1' OR '1'='1")
+    ks = _kinds(f)
+    assert "attack-sqli" in ks
+
+
+def test_attack_xss_in_request_body():
+    f = _flow(method="POST", url="https://t/comment",
+              request={"headers": [], "content_type": "text/plain",
+                       "body": "<script>alert(1)</script>", "body_encoding": "text"})
+    assert "attack-xss" in _kinds(f)
+
+
 def test_analyze_never_raises_on_garbage():
     assert findings.analyze({"garbage": True}) == []
     assert findings.analyze({"response": {"headers": "notalist"}}) == []

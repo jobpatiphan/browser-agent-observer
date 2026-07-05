@@ -13,7 +13,9 @@ import logging
 import os
 import time
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -536,6 +538,64 @@ async def export(redact: bool = False):
         "findings": sorted(findings, key=findings_engine.sort_key),
         "snapshots": list(snapshots),
     }
+
+
+def _har_headers(side: dict) -> list:
+    return [{"name": k, "value": v} for k, v in ((side or {}).get("headers") or [])]
+
+
+def _har_entry(f: dict) -> dict:
+    req = f.get("request") or {}
+    resp = f.get("response") or {}
+    url = f.get("url") or ""
+    ts = f.get("ts") or 0
+    dur = f.get("duration_ms") or 0
+    started = datetime.fromtimestamp(ts / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
+    entry = {
+        "startedDateTime": started,
+        "time": dur,
+        "request": {
+            "method": f.get("method") or "GET",
+            "url": url,
+            "httpVersion": "HTTP/1.1",
+            "headers": _har_headers(req),
+            "queryString": [{"name": k, "value": v}
+                            for k, v in parse_qsl(urlsplit(url).query, keep_blank_values=True)],
+            "cookies": [], "headersSize": -1, "bodySize": -1,
+        },
+        "response": {
+            "status": f.get("status") or 0,
+            "statusText": "",
+            "httpVersion": "HTTP/1.1",
+            "headers": _har_headers(resp),
+            "cookies": [],
+            "content": {
+                "size": resp.get("size", 0) or 0,
+                "mimeType": resp.get("content_type") or "",
+                **({"text": resp["body"]} if isinstance(resp.get("body"), str) else {}),
+            },
+            "redirectURL": "", "headersSize": -1, "bodySize": f.get("size", -1),
+        },
+        "cache": {},
+        "timings": {"send": 0, "wait": dur, "receive": 0},
+    }
+    if isinstance(req.get("body"), str) and req["body"]:
+        entry["request"]["postData"] = {"mimeType": req.get("content_type") or "",
+                                        "text": req["body"]}
+    return entry
+
+
+@app.get("/export.har")
+async def export_har(redact: bool = False):
+    # HAR 1.2 so captured traffic drops straight into Burp/ZAP/DevTools.
+    src = [_redact_flow(f) for f in flows] if redact else list(flows)
+    har = {"log": {
+        "version": "1.2",
+        "creator": {"name": "browser-agent-observer", "version": "1.0"},
+        "entries": [_har_entry(f) for f in src],
+    }}
+    from fastapi.responses import JSONResponse
+    return JSONResponse(har, headers={"content-disposition": "attachment; filename=session.har"})
 
 
 @app.get("/sessions")
