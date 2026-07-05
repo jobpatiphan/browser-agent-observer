@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml/badge.svg)](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)
 
 A live, visual dashboard for watching **any** browser-driving agent — Claude
 computer-use, Codex, a Playwright/Puppeteer script, your own harness — do its
