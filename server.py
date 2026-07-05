@@ -146,7 +146,14 @@ async def _auth_mw(request, call_next):
     if not _http_authed(request):
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    # Revalidate the UI shell + assets every load so a refreshed dashboard never
+    # serves a stale app.js/style.css after an update (ETag keeps it cheap: 304
+    # when unchanged). Without this, UI changes silently don't show up.
+    p = request.url.path
+    if p == "/" or p.startswith("/static"):
+        response.headers["cache-control"] = "no-cache, must-revalidate"
+    return response
 
 
 @app.get("/")

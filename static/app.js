@@ -50,13 +50,31 @@
   // ---- traffic filtering + security headers -----------------------------
   const filterMethod = document.getElementById("filter-method");
   const filterStatus = document.getElementById("filter-status");
+  const filterHost = document.getElementById("filter-host");
   const filterSearch = document.getElementById("filter-search");
-  [filterMethod, filterStatus].forEach((el) => el.addEventListener("change", applyFilters));
+  [filterMethod, filterStatus, filterHost].forEach((el) => el.addEventListener("change", applyFilters));
   filterSearch.addEventListener("input", applyFilters);
+
+  // Host of a URL — used both to separate mixed sessions in the table and to
+  // populate the host filter as new hosts appear.
+  const hostsSeen = new Set();
+  function hostOf(url) {
+    try { return new URL(url).host; } catch (e) { return ""; }
+  }
+  function noteHost(url) {
+    const h = hostOf(url);
+    if (h && !hostsSeen.has(h)) {
+      hostsSeen.add(h);
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = h;
+      filterHost.appendChild(opt);
+    }
+  }
 
   function rowMatches(ev) {
     if (!ev) return true;
     if (filterMethod.value && ev.method !== filterMethod.value) return false;
+    if (filterHost.value && hostOf(ev.url) !== filterHost.value) return false;
     if (filterStatus.value) {
       if (ev.status == null) return false;
       if (String(ev.status)[0] !== filterStatus.value) return false;
@@ -119,7 +137,16 @@
     return (n / (1024 * 1024)).toFixed(1) + "MB";
   }
 
+  // Path cell with a dim host prefix so requests to different hosts (mixed
+  // sessions) are visually distinct instead of looking identical by path alone.
+  function pathCell(event) {
+    const host = hostOf(event.url);
+    const hostTag = host ? `<span class="row-host">${escapeHtml(host)}</span>` : "";
+    return `<td title="${escapeHtml(event.url || "")}">${hostTag}${escapeHtml(event.path || event.url)}</td>`;
+  }
+
   function upsertFlow(event) {
+    if (event.url) noteHost(event.url);
     let row = rowsById.get(event.id);
     if (!row) {
       // An "error" event for a flow we never saw start is nothing to show.
@@ -145,7 +172,7 @@
       row.className = "pending";
       row.innerHTML =
         `<td class="${methodClass(event.method)}">${escapeHtml(event.method)}</td>` +
-        `<td title="${escapeHtml(event.url || "")}">${escapeHtml(event.path || event.url)}</td>` +
+        pathCell(event) +
         `<td>…</td><td>-</td><td>-</td><td>-</td>`;
     } else {
       row.className = "";
@@ -153,7 +180,7 @@
       row.dataset.ts = event.ts;
       row.innerHTML =
         `<td class="${methodClass(event.method)}">${escapeHtml(event.method)}</td>` +
-        `<td title="${escapeHtml(event.url || "")}">${escapeHtml(event.path || event.url)}</td>` +
+        pathCell(event) +
         `<td class="${statusClass(event.status)}">${event.status ?? "-"}</td>` +
         `<td>${fmtSize(event.size)}</td>` +
         `<td title="${new Date(event.ts).toLocaleTimeString([], { hour12: false })}">${event.duration_ms != null ? event.duration_ms + "ms" : "-"}</td>` +

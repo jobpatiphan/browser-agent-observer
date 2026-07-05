@@ -559,3 +559,8 @@ tbody tr.has-ws td:first-child { border-left: 2px solid var(--blue); }
   .replay-line { flex-wrap: wrap; }
   #replay-url { flex-basis: 100%; }
 }
+
+/* host separation in the traffic table */
+.row-host { color: var(--muted); font-size: 10px; margin-right: 6px; opacity: .8; }
+tbody tr:hover .row-host { opacity: 1; }
+#filter-host { max-width: 170px; }
