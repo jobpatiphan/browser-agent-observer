@@ -6,7 +6,7 @@ from the command line — same artifact as the dashboard's Export button.
     python3 tools/export_session.py --out s.html --no-redact
     DASH_URL=http://host:8790 python3 tools/export_session.py
 
-Handy for `/observe` record mode and CI/automation.
+Handy for `/observe-agent-browser` record mode and CI/automation.
 """
 import argparse
 import json

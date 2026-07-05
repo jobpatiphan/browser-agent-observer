@@ -21,7 +21,6 @@ import logging
 import os
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 import httpx
@@ -79,9 +78,11 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
-def get_page_targets():
-    tabs = json.loads(urllib.request.urlopen(f"{CDP_HOST}/json", timeout=5).read())
-    return [t for t in tabs if t.get("type") == "page"]
+async def get_page_targets(http):
+    # Async (via the shared httpx client) so the CDP /json round-trip never
+    # blocks the event loop — a blocking urlopen here stalled the whole feed.
+    r = await http.get(f"{CDP_HOST}/json")
+    return [t for t in r.json() if t.get("type") == "page"]
 
 
 async def get_selected(http):
@@ -95,7 +96,7 @@ async def get_selected(http):
 async def choose_target(http):
     """Pick which tab to mirror: the UI's explicit choice if still open, else
     auto — prefer a real navigated page over about:blank / devtools."""
-    pages = get_page_targets()
+    pages = await get_page_targets(http)
     if not pages:
         return None
     sel = await get_selected(http)
@@ -132,7 +133,12 @@ async def stream_screencast(client, http, tab):
             fut = asyncio.get_event_loop().create_future()
             pending[mid] = fut
             await ws.send(json.dumps({"id": mid, "method": method, "params": params or {}}))
-            return await asyncio.wait_for(fut, timeout=10)
+            try:
+                return await asyncio.wait_for(fut, timeout=10)
+            finally:
+                # Drop the entry even on timeout/cancel so a never-answered CDP
+                # command can't leak a future in `pending` forever.
+                pending.pop(mid, None)
 
         async def refresh_layout():
             try:
@@ -233,7 +239,7 @@ async def stream_screencast(client, http, tab):
             # open tab, or when our current tab closes, so main() re-attaches.
             while True:
                 try:
-                    pages = get_page_targets()
+                    pages = await get_page_targets(http)
                     client.send({
                         "type": "tabs", "ts": _now_ms(), "current": current_id,
                         "tabs": [{"id": t.get("id"), "title": t.get("title", ""),

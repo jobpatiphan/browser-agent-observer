@@ -6,6 +6,7 @@ exponential backoff whenever the connection drops or the backend is down,
 so producers never need to know whether the backend is currently reachable.
 """
 import asyncio
+import functools
 import json
 import queue
 import threading
@@ -54,7 +55,18 @@ class ReconnectingWSClient:
                 async with websockets.connect(self.url, open_timeout=5) as ws:
                     backoff = 1
                     while True:
-                        payload = await loop.run_in_executor(None, self._q.get)
+                        # Time-bound the blocking get so the default-executor
+                        # worker never parks forever on an idle queue. A worker
+                        # stuck in queue.get() with no timeout wedges interpreter
+                        # shutdown — ThreadPoolExecutor's atexit handler joins it
+                        # and blocks (this is what makes bare `pytest` hang once
+                        # the dashboard is reachable, since importing the addon
+                        # spins one of these clients up).
+                        try:
+                            payload = await loop.run_in_executor(
+                                None, functools.partial(self._q.get, timeout=0.5))
+                        except queue.Empty:
+                            continue
                         await ws.send(payload)
             except Exception:
                 await asyncio.sleep(backoff)

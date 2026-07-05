@@ -124,8 +124,9 @@ You can make your agent light up the dashboard automatically — see
   (`hooks/claude_mirror.py`) mirrors every Bash command, prompt and edit onto
   the timeline — the harness runs it, so it happens every time without the model
   remembering. It probes `/healthz` first and **no-ops in ~0.15s when the
-  dashboard is down**, so it's safe to install globally. Plus an `/observe`
-  skill that starts the dashboard and switches Claude into narrate mode.
+  dashboard is down**, so it's safe to install globally. Plus an
+  `/observe-agent-browser` skill that starts the dashboard, opens it, and
+  switches Claude into narrate mode.
 - **Codex** (`integrations/codex/`): `AGENTS.md` + an `obs-run` wrapper (Codex
   has no hooks, so mirroring is opt-in via the wrapper).
 

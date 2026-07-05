@@ -77,8 +77,14 @@ def _headers_list(headers) -> list:
 class DashboardAddon:
     def __init__(self):
         self.client = ReconnectingWSClient(BACKEND_WS, maxsize=5000, name="mitm-dashboard-ws")
-        self.client.start()
         self._start_ts = {}
+
+    def running(self):
+        # mitmproxy calls this once the proxy is up. Start the forwarder thread
+        # here rather than in __init__ so merely importing/constructing the addon
+        # (e.g. from the test suite) has no side effects — a client thread stuck
+        # on the backend socket used to wedge interpreter shutdown.
+        self.client.start()
 
     def request(self, flow):
         self._start_ts[flow.id] = time.time()

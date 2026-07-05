@@ -1,8 +1,8 @@
 # Claude Code integration
 
 Make Claude Code coordinate with the dashboard automatically: every Bash
-command, prompt and file edit shows up on the timeline, and `/observe` turns the
-whole thing on.
+command, prompt and file edit shows up on the timeline, and
+`/observe-agent-browser` turns the whole thing on.
 
 Two pieces:
 
@@ -19,17 +19,17 @@ project `.claude/settings.json`. Fix the path to your checkout.
 and exits silently (~0.15s) when the dashboard isn't running — zero effect on
 sessions where you're not watching.
 
-## 2. The `/observe` skill (the on-switch)
+## 2. The `/observe-agent-browser` skill (the on-switch)
 
-Copy `skills/observe/` into `~/.claude/skills/observe/`:
+Copy `skills/observe-agent-browser/` into `~/.claude/skills/`:
 
 ```bash
-cp -r integrations/claude-code/skills/observe ~/.claude/skills/observe
+cp -r integrations/claude-code/skills/observe-agent-browser ~/.claude/skills/observe-agent-browser
 ```
 
-Then in any Claude Code session, `/observe`:
-- starts the dashboard if it's down,
-- points you at http://127.0.0.1:8790 (and offers `./run.sh browser`),
+Then in any Claude Code session, `/observe-agent-browser`:
+- starts the dashboard if it's down and opens it in your browser,
+- offers a wired-up Chromium via `./run.sh browser`,
 - switches Claude into "narrate what I'm doing" mode.
 
 From then on the hooks stream the mechanics and Claude adds the story. Stop with

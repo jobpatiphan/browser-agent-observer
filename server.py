@@ -96,7 +96,11 @@ async def healthz():
 
 async def _broadcast(message: dict):
     dead = []
-    for ws in dashboard_clients:
+    # Snapshot: two ingest sources (mitmproxy + screencast) broadcast
+    # concurrently, and a tab connecting/disconnecting mid-send mutates the set
+    # — iterating the live set across the `await` would raise "Set changed size
+    # during iteration".
+    for ws in list(dashboard_clients):
         try:
             await ws.send_json(message)
         except Exception:
@@ -296,11 +300,18 @@ def _redact_url(url: str) -> str:
     from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
     try:
         p = urlsplit(url)
-        if not p.query:
-            return url
-        q = [(k, REDACTED if k.lower() in SENSITIVE_QUERY else v)
-             for k, v in parse_qsl(p.query, keep_blank_values=True)]
-        return urlunsplit(p._replace(query=urlencode(q)))
+        # Mask credentials embedded in the authority (user:pass@host) so a
+        # shared replay can't leak basic-auth creds baked into a URL.
+        if p.username or p.password:
+            host = p.hostname or ""
+            if p.port:
+                host = f"{host}:{p.port}"
+            p = p._replace(netloc=f"{REDACTED}@{host}")
+        if p.query:
+            q = [(k, REDACTED if k.lower() in SENSITIVE_QUERY else v)
+                 for k, v in parse_qsl(p.query, keep_blank_values=True)]
+            p = p._replace(query=urlencode(q))
+        return urlunsplit(p)
     except Exception:
         return url
 
