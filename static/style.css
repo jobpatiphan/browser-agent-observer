@@ -529,3 +529,33 @@ tbody tr.has-ws td:first-child { border-left: 2px solid var(--blue); }
 /* .hidden isn't a global rule here — id-level display must be overridden per element */
 #graph-overlay.hidden, #replay-overlay.hidden, #search-results.hidden { display: none; }
 .findings-count.hidden { display: none; }
+
+/* ---- responsive: stack the 3 panes on narrow screens ------------------ */
+@media (max-width: 960px) {
+  html, body { height: auto; overflow-y: auto; }
+  #topbar { flex-wrap: wrap; gap: 8px 10px; }
+  .muted { margin-left: 8px; }
+  #global-search { width: 130px; flex: 1 1 120px; }
+  #search-results { width: 92vw; right: 4vw; top: 84px; }
+  #layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas: "browser" "traffic" "narration";
+    height: auto;
+    min-height: calc(100vh - 40px);
+  }
+  #browser-pane { min-height: 46vh; }
+  #traffic-pane, #narration-pane { min-height: 60vh; }
+  #graph-panel, #replay-panel { width: 96vw; height: 88vh; }
+  #detail-panel { width: 96vw; }
+}
+
+/* very small / phones: tighten chrome so content wins the space */
+@media (max-width: 560px) {
+  .brand { font-size: 12px; }
+  #global-search { width: 100%; flex-basis: 100%; order: 5; }
+  #traffic-filters { flex-wrap: wrap; }
+  #graph-panel, #replay-panel, #detail-panel { width: 100vw; height: 92vh; border-radius: 0; }
+  .replay-line { flex-wrap: wrap; }
+  #replay-url { flex-basis: 100%; }
+}
