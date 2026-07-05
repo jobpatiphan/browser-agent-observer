@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml/badge.svg)](https://github.com/jobpatiphan/browser-agent-observer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)
+![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
 
 A live, visual dashboard for watching **any** browser-driving agent — Claude
 computer-use, Codex, a Playwright/Puppeteer script, your own harness — do its
@@ -29,6 +29,14 @@ page). Frame capture tightens automatically during bursts of activity.
 It's **agent-agnostic**: the dashboard doesn't drive anything. It just observes
 a browser you point at it.
 
+**Why not an existing viewer?** Live browser viewers usually ship *inside* one
+agent framework (you must drive with their runner), and LLM-observability tools
+(Langfuse, Braintrust, AgentOps…) trace prompts and tokens, not the wire. This
+sits in the gap: decoupled from any driver, and it pairs the screencast with
+**Burp/ZAP-style HTTP+WebSocket inspection** (security-header scoring, redacted
+replay export) — built for *watching and auditing* a browser agent, security
+work included.
+
 ## Quickstart
 
 ```bash
@@ -42,18 +50,21 @@ cp .env.example .env                      # optional — defaults work as-is
 ./run.sh up                               # starts backend + proxy + forwarder
 ```
 
-`run.sh up` prints the dashboard URL and the exact browser command. Then:
+`run.sh up` waits for the backend, then **opens the dashboard in your browser**
+automatically (set `OPEN_DASH=0` for headless/CI). Then:
 
 ```bash
 ./run.sh browser        # launches a Chromium wired to the proxy + CDP for you
+#   (reuses an already-open CDP session instead of spawning a duplicate)
 #   — or launch your agent's own browser with:
 #     chromium --remote-debugging-port=9222 --proxy-server=127.0.0.1:8083 \
 #              --user-data-dir=/tmp/bao-browser --ignore-certificate-errors
 ```
 
-Open **http://127.0.0.1:8790** and drive the browser with your agent — traffic,
-frames and navigations show up live. `./run.sh down` stops everything;
-`./run.sh status` / `./run.sh logs <backend|proxy|screencast>` to inspect.
+Drive the browser with your agent — traffic, frames and navigations show up
+live at **http://127.0.0.1:8790** (`./run.sh open` reopens it). `./run.sh down`
+stops everything; `./run.sh status` /
+`./run.sh logs <backend|proxy|screencast|browser>` to inspect.
 
 ### Or with Docker
 
@@ -141,6 +152,8 @@ All via env (see `.env.example`) — every value has a loopback default:
 | `PROXY_HOST` / `PROXY_PORT` | `127.0.0.1` / `8083` | traffic proxy listen address |
 | `CDP_URL` | `http://localhost:9222` | CDP endpoint of the driven browser |
 | `DASH_ALLOWED_ORIGINS` | *(none)* | extra allowed WS Origins, comma-separated |
+| `OPEN_DASH` | `1` | `run.sh up` auto-opens the dashboard (`0` = headless/CI) |
+| `BROWSER_USER_DATA_DIR` | `/tmp/bao-browser` | dedicated profile for `run.sh browser` |
 
 ## HTTPS interception
 
