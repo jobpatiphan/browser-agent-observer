@@ -22,9 +22,16 @@ thing. Three panes, computer-use style:
   plus auto-detected navigations. One-click **Export** to a self-contained
   replay `.html` (with credential **redaction** and a frame scrubber synced to
   traffic + activity).
+- **Findings** — passive security triage of every captured flow: secrets on the
+  wire, insecure cookies, missing hardening headers, credentialed CORS
+  wildcards, verbose stack traces, reflected input, PII/credit-cards/keys in
+  responses, and SQLi/XSS/traversal payloads the agent itself sent — each
+  severity-ranked and one click from the request that raised it.
 
-Multiple tabs? A dropdown picks which one to mirror (or auto-follows the active
-page). Frame capture tightens automatically during bursts of activity.
+Plus a **◉ Graph** attack-surface map (hosts coloured by worst finding), a
+**⟳ Replay** Burp-Repeater-lite, **HAR** export for Burp/ZAP, and a
+search-everything box. Multiple tabs? A dropdown picks which to mirror (or
+auto-follows). Frame capture tightens automatically during activity.
 
 It's **agent-agnostic**: the dashboard doesn't drive anything. It just observes
 a browser you point at it.
@@ -120,8 +127,15 @@ curl -sX POST localhost:8790/action -H 'content-type: application/json' \
 | `POST /command` | `{cmd}` — shell command line (monospace) |
 | `GET /history` | recent frames (filmstrip lazy-load) |
 | `GET /export[?redact=1]` | full session snapshot → self-contained replay `.html`; `redact=1` masks credentials |
+| `GET /export.har[?redact=1]` | captured traffic as HAR 1.2 → import into Burp / ZAP / DevTools |
+| `GET /findings` | security findings, most-severe first |
+| `GET /search?q=` | one search across traffic, WS, narration, commands, findings |
+| `GET /graph` | hosts + relationships (Referer/redirect) for the attack-surface map |
+| `POST /replay` | `{method,url,headers?,body?}` — resend through the proxy (Repeater) |
+| `POST /snapshot` | capture a DOM + frame snapshot now |
+| `GET /sessions`, `GET /sessions/{name}` | list / reopen persisted sessions (needs `PERSIST_DIR`) |
 | `POST /select-tab` | `{targetId}` — choose which browser tab to mirror (null = auto) |
-| `GET /metrics` | Prometheus-style gauges (flows, frames, clients, uptime) |
+| `GET /metrics` | Prometheus-style gauges (flows, frames, clients, findings, uptime) |
 | `GET /healthz` | liveness + counts |
 
 CLI export (no UI): `./run.sh export [--out file.html] [--no-redact]`.
@@ -140,6 +154,9 @@ You can make your agent light up the dashboard automatically — see
   switches Claude into narrate mode.
 - **Codex** (`integrations/codex/`): `AGENTS.md` + an `obs-run` wrapper (Codex
   has no hooks, so mirroring is opt-in via the wrapper).
+- **Any other driver** — Playwright, Puppeteer, Selenium, browser-use, LangGraph:
+  copy-paste launch flags in [`integrations/recipes.md`](integrations/recipes.md)
+  (runnable Playwright example under `integrations/playwright/`).
 
 ## Configuration
 
@@ -154,6 +171,43 @@ All via env (see `.env.example`) — every value has a loopback default:
 | `DASH_ALLOWED_ORIGINS` | *(none)* | extra allowed WS Origins, comma-separated |
 | `OPEN_DASH` | `1` | `run.sh up` auto-opens the dashboard (`0` = headless/CI) |
 | `BROWSER_USER_DATA_DIR` | `/tmp/bao-browser` | dedicated profile for `run.sh browser` |
+| `SCOPE_HOSTS` | *(all)* | comma-separated host globs to capture (e.g. `*.target.com,10.0.0.*`) |
+| `DASH_TOKEN` | *(none)* | shared-token gate on the API + websockets when binding beyond loopback |
+| `PERSIST_DIR` | *(none)* | append each session to JSONL here so it can be reopened |
+
+## Security auditing
+
+Built for watching a browser agent with a pentester's eye:
+
+- **Findings** — every flow is triaged for secrets in URLs, insecure cookies,
+  missing hardening headers, credentialed CORS wildcards, verbose stack traces,
+  reflected input, PII / credit-cards / API keys / private keys in responses,
+  and SQLi / XSS / path-traversal / command-injection payloads the agent sent.
+  Heuristic leads to verify by hand — see `findings.py`.
+- **◉ Graph** — an attack-surface map: each host the session touched, coloured
+  by its worst finding, linked by Referer and redirect edges.
+- **⟳ Replay** — open any captured request, edit method/url/headers/body, resend
+  through the proxy; it reappears on the timeline and is re-scored.
+- **HAR export** — hand the traffic to Burp / ZAP / DevTools.
+- **Scope** — set `SCOPE_HOSTS` to keep out-of-scope noise off the timeline.
+
+> Replay sends real traffic and the API can drive requests, so gate it with
+> `DASH_TOKEN` whenever the dashboard isn't strictly on loopback.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Agent[Any browser-driving agent] -->|drives| Browser[Chromium]
+  Browser -->|HTTP/S| Proxy[mitmproxy + addon.py]
+  Browser -->|CDP screencast| Fwd[screencast_forwarder.py]
+  Agent -.->|optional narration| Backend
+  Proxy -->|flows / WS frames| Backend[server.py FastAPI]
+  Fwd -->|frames / snapshots| Backend
+  Backend -->|analyze| Findings[findings.py]
+  Backend -->|websocket fan-out| UI[Dashboard UI]
+  Backend -->|append| JSONL[(PERSIST_DIR)]
+```
 
 ## HTTPS interception
 
