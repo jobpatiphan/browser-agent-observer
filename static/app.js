@@ -8,6 +8,14 @@
   const trafficBody = document.getElementById("traffic-body");
   const narrationBody = document.getElementById("narration-body");
 
+  // If the dashboard is token-gated (DASH_TOKEN), the page is opened as
+  // ?token=… ; carry it onto every API call + the websocket.
+  const TOKEN = new URLSearchParams(location.search).get("token") || "";
+  function api(path) {
+    if (!TOKEN) return path;
+    return path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+  }
+
   // Latest frame's page dimensions (px), so we can map action coords onto the
   // scaled <img>. Client-side cursor is approximate; the authoritative
   // highlight is the one baked into the frame by the forwarder.
@@ -431,6 +439,38 @@
       addWsMessage(event);
     } else if (event.type === "tabs") {
       renderTabs(event);
+    } else if (event.type === "finding") {
+      addFinding(event);
+    }
+  }
+
+  // ---- security findings ------------------------------------------------
+  const findingsCountEl = document.getElementById("findings-count");
+  const seenFindings = new Set();
+  let findingCount = 0;
+
+  function addFinding(ev) {
+    if (ev.id) {
+      if (seenFindings.has(ev.id)) return;
+      seenFindings.add(ev.id);
+    }
+    findingCount++;
+    findingsCountEl.textContent = findingCount;
+    findingsCountEl.classList.remove("hidden");
+    const sev = ev.severity || "info";
+    const where = ev.path ? ` <span class="finding-path">${escapeHtml((ev.method || "") + " " + ev.path)}</span>` : "";
+    const label =
+      `<span class="sev sev-${sev}">${sev}</span>` +
+      `<b>${escapeHtml(ev.title || "")}</b> ` +
+      `<span class="finding-detail">${escapeHtml(ev.detail || "")}</span>${where}`;
+    const line = addActivity("finding", ev.ts, label, "sevline-" + sev);
+    if (ev.flow_id) {
+      line.classList.add("clickable");
+      line.title = "open the related request";
+      line.addEventListener("click", () => {
+        if (flowDataById.get(ev.flow_id)) showDetail(ev.flow_id);
+        else syncToTraffic(ev.ts);
+      });
     }
   }
 
@@ -442,7 +482,7 @@
   let lastTabsKey = "";
 
   function selectTab(targetId) {
-    fetch("/select-tab", {
+    fetch(api("/select-tab"), {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ targetId }),
     });
@@ -526,7 +566,7 @@
   document.getElementById("export-btn").addEventListener("click", async () => {
     try {
       const redact = document.getElementById("redact-cb").checked ? "1" : "0";
-      const data = await (await fetch("/export?redact=" + redact)).json();
+      const data = await (await fetch(api("/export?redact=" + redact))).json();
       const html = buildReplayHtml(data);
       const blob = new Blob([html], { type: "text/html" });
       const a = document.createElement("a");
@@ -610,7 +650,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/ws/dashboard`);
+    const ws = new WebSocket(`${proto}//${location.host}${api("/ws/dashboard")}`);
 
     ws.onopen = () => {
       statusEl.textContent = "live";
@@ -630,6 +670,189 @@ function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<
       }
     };
   }
+
+  // ---- snapshot + HAR buttons -------------------------------------------
+  document.getElementById("snapshot-btn").addEventListener("click", () => {
+    fetch(api("/snapshot"), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ label: "manual" }),
+    }).catch(() => {});
+  });
+  document.getElementById("har-btn").addEventListener("click", () => {
+    const redact = document.getElementById("redact-cb").checked ? "1" : "0";
+    const a = document.createElement("a");
+    a.href = api("/export.har?redact=" + redact);
+    a.download = "session.har";
+    a.click();
+  });
+
+  // ---- global search ----------------------------------------------------
+  const gsearch = document.getElementById("global-search");
+  const gresults = document.getElementById("search-results");
+  let searchTimer = null;
+  gsearch.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 200);
+  });
+  gsearch.addEventListener("blur", () => setTimeout(() => gresults.classList.add("hidden"), 200));
+  gsearch.addEventListener("focus", () => { if (gresults.children.length) gresults.classList.remove("hidden"); });
+
+  async function runSearch() {
+    const q = gsearch.value.trim();
+    if (!q) { gresults.classList.add("hidden"); return; }
+    let d;
+    try {
+      d = await (await fetch(api("/search?q=" + encodeURIComponent(q) + "&limit=50"))).json();
+    } catch (e) { return; }
+    if (!d.results.length) {
+      gresults.innerHTML = '<div class="sr-empty">no matches</div>';
+    } else {
+      gresults.innerHTML = d.results.map((r) =>
+        `<div class="sr-row" data-kind="${r.kind}" data-ref="${escapeHtml(r.ref || "")}">` +
+        `<span class="sr-kind sr-${r.kind}">${r.kind}</span>` +
+        `${escapeHtml((r.label || "").slice(0, 100))}</div>`).join("");
+    }
+    gresults.classList.remove("hidden");
+    gresults.querySelectorAll(".sr-row").forEach((row) => {
+      row.addEventListener("mousedown", () => {
+        const ref = row.dataset.ref;
+        if ((row.dataset.kind === "flow" || row.dataset.kind === "finding") && ref && flowDataById.get(ref)) {
+          showDetail(ref);
+        }
+        gresults.classList.add("hidden");
+      });
+    });
+  }
+
+  // ---- traffic relationship graph (attack-surface map) ------------------
+  const SEV_COLOR = { high: "#f85149", medium: "#f59e0b", low: "#3fb950", info: "#58a6ff" };
+  const graphOverlay = document.getElementById("graph-overlay");
+  const graphCanvas = document.getElementById("graph-canvas");
+  let graphAnim = null;
+  document.getElementById("graph-close").addEventListener("click", stopGraph);
+  graphOverlay.addEventListener("click", (e) => { if (e.target === graphOverlay) stopGraph(); });
+  document.getElementById("graph-btn").addEventListener("click", openGraph);
+
+  function stopGraph() {
+    graphOverlay.classList.add("hidden");
+    if (graphAnim) { cancelAnimationFrame(graphAnim); graphAnim = null; }
+  }
+
+  async function openGraph() {
+    let data;
+    try { data = await (await fetch(api("/graph"))).json(); } catch (e) { return; }
+    graphOverlay.classList.remove("hidden");
+    document.getElementById("graph-meta").textContent =
+      `(${data.nodes.length} hosts, ${data.edges.length} links)`;
+    document.getElementById("graph-legend").innerHTML = Object.keys(SEV_COLOR).map((k) =>
+      `<span class="lg"><i style="background:${SEV_COLOR[k]}"></i>${k}</span>`).join("");
+    runGraph(data);
+  }
+
+  function runGraph(data) {
+    if (graphAnim) cancelAnimationFrame(graphAnim);
+    const cv = graphCanvas, ctx = cv.getContext("2d");
+    const rect = cv.parentElement.getBoundingClientRect();
+    const W = cv.width = rect.width, H = cv.height = rect.height - 46;
+    const idx = new Map();
+    const nodes = data.nodes.map((n, i) => {
+      idx.set(n.id, i);
+      return { ...n, x: W / 2 + Math.cos(i * 1.3) * 140 + (Math.random() - 0.5) * 30,
+               y: H / 2 + Math.sin(i * 1.3) * 140 + (Math.random() - 0.5) * 30, vx: 0, vy: 0 };
+    });
+    const edges = data.edges
+      .map((e) => ({ s: idx.get(e.source), t: idx.get(e.target), kind: e.kind }))
+      .filter((e) => e.s != null && e.t != null);
+
+    function step() {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          let dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          let d2 = dx * dx + dy * dy + 0.01, d = Math.sqrt(d2), f = 2600 / d2;
+          let fx = f * dx / d, fy = f * dy / d;
+          nodes[i].vx += fx; nodes[i].vy += fy; nodes[j].vx -= fx; nodes[j].vy -= fy;
+        }
+      }
+      for (const e of edges) {
+        let a = nodes[e.s], b = nodes[e.t];
+        let dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        let f = (d - 120) * 0.02, fx = f * dx / d, fy = f * dy / d;
+        a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+      }
+      for (const n of nodes) {
+        n.vx += (W / 2 - n.x) * 0.001; n.vy += (H / 2 - n.y) * 0.001;
+        n.vx *= 0.85; n.vy *= 0.85; n.x += n.vx; n.y += n.vy;
+        n.x = Math.max(24, Math.min(W - 24, n.x));
+        n.y = Math.max(24, Math.min(H - 24, n.y));
+      }
+      draw();
+      graphAnim = requestAnimationFrame(step);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.lineWidth = 1;
+      for (const e of edges) {
+        let a = nodes[e.s], b = nodes[e.t];
+        ctx.strokeStyle = e.kind === "redirect" ? "rgba(245,158,11,.5)" : "rgba(139,148,158,.35)";
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      for (const n of nodes) {
+        const r = Math.min(6 + Math.sqrt(n.requests || 1) * 2, 18);
+        ctx.fillStyle = SEV_COLOR[n.severity] || "#8b949e";
+        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 7); ctx.fill();
+        ctx.fillStyle = "#c9d1d9"; ctx.font = "11px monospace";
+        ctx.fillText(String(n.id).slice(0, 30), n.x + r + 3, n.y + 4);
+      }
+    }
+    step();
+  }
+
+  // ---- replay (Burp-Repeater-lite) --------------------------------------
+  const replayOverlay = document.getElementById("replay-overlay");
+  document.getElementById("replay-close").addEventListener("click", () => replayOverlay.classList.add("hidden"));
+  replayOverlay.addEventListener("click", (e) => { if (e.target === replayOverlay) replayOverlay.classList.add("hidden"); });
+  document.getElementById("replay-btn").addEventListener("click", () => { if (openDetailId) openReplay(openDetailId); });
+
+  function openReplay(id) {
+    const ev = flowDataById.get(id);
+    if (!ev) return;
+    document.getElementById("replay-method").value = ev.method || "GET";
+    document.getElementById("replay-url").value = ev.url || "";
+    document.getElementById("replay-headers").value =
+      headerPairs(ev.request && ev.request.headers).map(([k, v]) => `${k}: ${v}`).join("\n");
+    document.getElementById("replay-reqbody").value =
+      (ev.request && typeof ev.request.body === "string") ? ev.request.body : "";
+    document.getElementById("replay-status").textContent = "";
+    document.getElementById("replay-response").textContent = "";
+    replayOverlay.classList.remove("hidden");
+  }
+
+  document.getElementById("replay-send").addEventListener("click", async () => {
+    const method = document.getElementById("replay-method").value;
+    const url = document.getElementById("replay-url").value.trim();
+    const headers = document.getElementById("replay-headers").value.split("\n").map((l) => {
+      const i = l.indexOf(":");
+      return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null;
+    }).filter(Boolean);
+    const body = document.getElementById("replay-reqbody").value;
+    const statusEl = document.getElementById("replay-status");
+    const respEl = document.getElementById("replay-response");
+    statusEl.textContent = "sending…";
+    try {
+      const r = await fetch(api("/replay"), {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method, url, headers, body: body || null }),
+      });
+      const d = await r.json();
+      if (!r.ok) { statusEl.textContent = "error"; respEl.textContent = JSON.stringify(d, null, 2); return; }
+      statusEl.textContent = `${d.status} · ${fmtSize(d.size)} · ${d.duration_ms}ms`;
+      const hdrTxt = (d.headers || []).map(([k, v]) => `${k}: ${v}`).join("\n");
+      respEl.textContent = hdrTxt + "\n\n" + (d.body || "") + (d.body_truncated ? "\n… [truncated]" : "");
+    } catch (e) {
+      statusEl.textContent = "failed"; respEl.textContent = String(e);
+    }
+  });
 
   connect();
 })();

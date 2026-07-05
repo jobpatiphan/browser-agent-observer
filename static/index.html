@@ -10,6 +10,10 @@
     <span class="brand">browser-agent-observer</span>
     <span id="conn-status" class="pill pill-down">connecting…</span>
     <span id="flow-count" class="muted"></span>
+    <span id="topbar-spacer"></span>
+    <input id="global-search" type="search" placeholder="🔍 search everything" autocomplete="off">
+    <button id="graph-btn" class="topbtn" title="traffic relationship graph">◉ Graph</button>
+    <div id="search-results" class="hidden"></div>
   </header>
 
   <main id="layout">
@@ -64,9 +68,12 @@
         <button class="log-tab" data-filter="narration">Narration</button>
         <button class="log-tab" data-filter="action">Actions</button>
         <button class="log-tab" data-filter="command">Commands</button>
+        <button class="log-tab" data-filter="finding">Findings <span id="findings-count" class="findings-count hidden">0</span></button>
         <label id="redact-toggle" title="Mask Authorization / Cookie / token query params in the export">
           <input type="checkbox" id="redact-cb" checked> redact
         </label>
+        <button id="snapshot-btn" title="Capture a DOM + frame snapshot now">📸</button>
+        <button id="har-btn" title="Download traffic as HAR (import into Burp / ZAP)">HAR</button>
         <button id="export-btn" title="Download this session for replay">⤓ Export</button>
       </div>
       <div class="pane-body" id="narration-body"></div>
@@ -77,6 +84,7 @@
     <div id="detail-panel">
       <div id="detail-header">
         <span id="detail-title"></span>
+        <button id="replay-btn" title="Edit & resend this request (Repeater)">⟳ Replay</button>
         <button id="detail-close">✕</button>
       </div>
       <div id="detail-tabs">
@@ -92,6 +100,42 @@
         <div class="detail-view hidden" id="tab-cookies"></div>
         <div class="detail-view hidden" id="tab-timing"></div>
         <div class="detail-view hidden" id="tab-ws"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="graph-overlay" class="hidden">
+    <div id="graph-panel">
+      <div id="graph-header">
+        <span>Traffic relationship map <span class="muted" id="graph-meta"></span></span>
+        <span id="graph-legend"></span>
+        <button id="graph-close">✕</button>
+      </div>
+      <canvas id="graph-canvas"></canvas>
+    </div>
+  </div>
+
+  <div id="replay-overlay" class="hidden">
+    <div id="replay-panel">
+      <div id="replay-header">
+        <span>Replay request <span class="muted">— resends through the proxy, re-captured on the timeline</span></span>
+        <button id="replay-close">✕</button>
+      </div>
+      <div id="replay-body">
+        <div class="replay-line">
+          <select id="replay-method">
+            <option>GET</option><option>POST</option><option>PUT</option>
+            <option>DELETE</option><option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+          </select>
+          <input id="replay-url" type="text" placeholder="https://target/path">
+          <button id="replay-send">Send ▶</button>
+        </div>
+        <label class="replay-lbl">Headers (one <code>Name: value</code> per line)</label>
+        <textarea id="replay-headers" rows="5" spellcheck="false"></textarea>
+        <label class="replay-lbl">Body</label>
+        <textarea id="replay-reqbody" rows="4" spellcheck="false"></textarea>
+        <div class="replay-lbl">Response <span id="replay-status" class="muted"></span></div>
+        <pre id="replay-response" class="detail-view"></pre>
       </div>
     </div>
   </div>

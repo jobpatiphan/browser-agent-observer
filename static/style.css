@@ -440,3 +440,92 @@ tbody tr.has-ws td:first-child { border-left: 2px solid var(--blue); }
 .ws-in { color: var(--green); }
 .ws-t { color: var(--muted); }
 .ws-msg code { word-break: break-all; color: var(--text); white-space: pre-wrap; }
+
+/* ---- topbar search + graph button + findings ------------------------- */
+#topbar-spacer { flex: 1; }
+#global-search {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 5px; padding: 4px 8px; font: inherit; font-size: 12px; width: 200px;
+}
+#global-search:focus { outline: none; border-color: var(--accent); }
+.topbtn {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 5px; padding: 4px 9px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.topbtn:hover { border-color: var(--accent); color: var(--accent); }
+#search-results {
+  position: absolute; top: 40px; right: 16px; width: 460px; max-height: 60vh; overflow: auto;
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px;
+  z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.sr-row { padding: 6px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-row:hover { background: var(--bg); }
+.sr-kind { display: inline-block; min-width: 62px; font-size: 10px; text-transform: uppercase; color: var(--muted); margin-right: 8px; }
+.sr-finding { color: var(--accent); }
+.sr-empty { padding: 10px; color: var(--muted); font-style: italic; }
+
+/* ---- findings --------------------------------------------------------- */
+.findings-count { background: var(--red); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 10px; margin-left: 4px; }
+.sev { display: inline-block; min-width: 54px; text-align: center; font-size: 9px; text-transform: uppercase;
+  font-weight: 700; border-radius: 3px; padding: 1px 4px; margin-right: 6px; }
+.sev-high { background: #4a1616; color: #f85149; border: 1px solid #7f1d1d; }
+.sev-medium { background: #40320d; color: #f59e0b; border: 1px solid #7a5a12; }
+.sev-low { background: #12331b; color: #3fb950; border: 1px solid #196b2e; }
+.sev-info { background: #12283f; color: #58a6ff; border: 1px solid #1d4a7a; }
+.log-finding .finding-detail { color: var(--muted); }
+.log-finding .finding-path { color: var(--blue); }
+.log-finding.sevline-high { border-left: 2px solid #f85149; }
+.log-finding.sevline-medium { border-left: 2px solid #f59e0b; }
+.log-finding.sevline-low { border-left: 2px solid #3fb950; }
+.log-finding.sevline-info { border-left: 2px solid #58a6ff; }
+
+/* ---- extra activity buttons ------------------------------------------ */
+#snapshot-btn, #har-btn {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
+}
+#snapshot-btn:hover, #har-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---- graph overlay ---------------------------------------------------- */
+#graph-overlay, #replay-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+#graph-panel, #replay-panel {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  width: 84vw; height: 82vh; display: flex; flex-direction: column; overflow: hidden;
+}
+#graph-header, #replay-header {
+  display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+  background: var(--bg-alt); border-bottom: 1px solid var(--border); font-size: 12px;
+}
+#graph-header > span:first-child, #replay-header > span:first-child { flex: 1; font-weight: 600; }
+#graph-legend { display: flex; gap: 12px; }
+#graph-legend .lg { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+#graph-legend .lg i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+#graph-canvas { flex: 1; width: 100%; }
+#graph-close, #replay-close { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+#graph-close:hover, #replay-close:hover { color: var(--text); }
+
+/* ---- replay panel ----------------------------------------------------- */
+#replay-panel { width: 70vw; height: 80vh; }
+#replay-body { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.replay-line { display: flex; gap: 8px; }
+#replay-method { background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px; }
+#replay-url { flex: 1; background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font: inherit; }
+#replay-send { background: var(--accent); color: #000; border: none; border-radius: 4px; padding: 4px 14px; font-weight: 700; cursor: pointer; }
+.replay-lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+#replay-headers, #replay-reqbody {
+  background: var(--bg-alt); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px; resize: vertical;
+}
+#replay-response { flex: 1; min-height: 120px; margin: 0; overflow: auto; }
+#replay-btn {
+  background: var(--bg-alt); border: 1px solid var(--border); color: var(--accent);
+  border-radius: 4px; padding: 2px 10px; font: inherit; font-size: 11px; cursor: pointer; margin-left: auto;
+}
+#replay-btn:hover { border-color: var(--accent); }
+
+/* .hidden isn't a global rule here — id-level display must be overridden per element */
+#graph-overlay.hidden, #replay-overlay.hidden, #search-results.hidden { display: none; }
+.findings-count.hidden { display: none; }
