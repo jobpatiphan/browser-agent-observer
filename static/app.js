@@ -497,7 +497,8 @@
   input[type=range]{width:100%}
   table{width:100%;border-collapse:collapse}td{padding:3px 6px;border-bottom:1px solid #161b22;font-size:11.5px}
   .tag{font-size:9px;text-transform:uppercase;color:#8b949e;border:1px solid #30363d;border-radius:3px;padding:0 4px;margin-right:6px}
-  .a{color:#ffd9a0}.c{color:#60a5fa}.n{color:#c9d1d9}
+  .a{color:#ffd9a0}.c{color:#60a5fa}.n{color:#c9d1d9}.w{color:#7fd4ff}
+  .hl{background:#2a2410 !important;outline:1px solid #f59e0b}
   h3{color:#8b949e;font-size:11px;text-transform:uppercase}
 </style></head><body>
 <header>Pentest session replay — exported ${new Date(data.meta.exported_ts).toLocaleString()}</header>
@@ -517,20 +518,27 @@
 const D=${json};
 const img=document.getElementById('frame'),scrub=document.getElementById('scrub'),
       pos=document.getElementById('pos'),fts=document.getElementById('fts');
-function show(i){if(!D.frames.length)return;const f=D.frames[i];img.src='data:image/jpeg;base64,'+f.data;
-  pos.textContent=i+1;fts.textContent=new Date(f.ts).toLocaleTimeString();}
-scrub.oninput=e=>show(+e.target.value);show(0);
 const ev=[].concat(
   D.narration.map(x=>({ts:x.ts,k:'n',t:x.text})),
   D.actions.map(x=>({ts:x.ts,k:'a',t:x.action+' '+(x.target||'')+(x.coords?' ('+x.coords.x+','+x.coords.y+')':'')})),
-  D.commands.map(x=>({ts:x.ts,k:'c',t:'$ '+x.cmd}))
+  D.commands.map(x=>({ts:x.ts,k:'c',t:'$ '+x.cmd})),
+  (D.ws||[]).map(x=>({ts:x.ts,k:'w',t:(x.from_client?'▲ ':'▼ ')+(x.encoding==='base64'?'[binary '+x.size+'B]':x.payload)}))
 ).sort((a,b)=>a.ts-b.ts);
 document.getElementById('log').innerHTML=ev.map(e=>
-  '<div class="'+e.k+'"><span class="tag">'+({n:'narr',a:'action',c:'cmd'}[e.k])+'</span>'+
+  '<div class="'+e.k+'" data-ts="'+e.ts+'"><span class="tag">'+({n:'narr',a:'action',c:'cmd',w:'ws'}[e.k])+'</span>'+
   new Date(e.ts).toLocaleTimeString()+' '+esc(e.t)+'</div>').join('');
 document.getElementById('traf').innerHTML=D.flows.map(f=>
-  '<tr><td>'+esc(f.method)+'</td><td>'+esc(f.path||f.url||'')+'</td><td>'+(f.status||'-')+
+  '<tr data-ts="'+(f.ts||0)+'"><td>'+esc(f.method)+'</td><td>'+esc(f.path||f.url||'')+'</td><td>'+(f.status||'-')+
   '</td><td>'+(f.duration_ms!=null?f.duration_ms+'ms':'-')+'</td></tr>').join('');
+function nearest(sel,ts){let best=null,bd=Infinity;document.querySelectorAll(sel).forEach(function(el){var t=+el.dataset.ts;if(!t)return;var d=Math.abs(t-ts);if(d<bd){bd=d;best=el;}});return best;}
+function show(i){if(!D.frames.length)return;const f=D.frames[i];img.src='data:image/jpeg;base64,'+f.data;
+  pos.textContent=i+1;fts.textContent=new Date(f.ts).toLocaleTimeString();
+  document.querySelectorAll('.hl').forEach(function(el){el.classList.remove('hl');});
+  // Scrubbing a frame highlights the traffic + activity captured closest in time.
+  var l=nearest('#log>div',f.ts); if(l){l.classList.add('hl');l.scrollIntoView({block:'nearest'});}
+  var r=nearest('#traf tr',f.ts); if(r){r.classList.add('hl');r.scrollIntoView({block:'nearest'});}
+}
+scrub.oninput=e=>show(+e.target.value);show(0);
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 </script></body></html>`;
   }
